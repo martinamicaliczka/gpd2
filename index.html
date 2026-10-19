@@ -320,10 +320,10 @@ function groupRecs(users, genres={}){
   return out;
 }
 
-/* Similitud entre dos usuarios: requiere ≥3 películas en común */
+/* Similitud entre dos usuarios: requiere ≥2 películas en común */
 function similarity(a, b){
   const common = rated(a).filter(id => (b.ratings||{})[id] > 0);
-  if (common.length < 3) return null;
+  if (common.length < 2) return null;
   const diff = avg(common.map(id => Math.abs(a.ratings[id] - b.ratings[id])));
   return {sim: clamp(1 - diff/4, 0, 1), common, diff};
 }
@@ -492,7 +492,7 @@ async function FirebaseDB(cfg){
     async setMovie(id, m){ await setDoc(doc(db,'movies',id), m); },
     onMovies(cb){ return onSnapshot(collection(db,'movies'), snap => cb(snap.docs.map(d => d.data()))); },
     async sendMsg(chatId, msg){ await addDoc(collection(db,'chats',chatId,'messages'), msg); },
-    onMsgs(chatId, cb){ return onSnapshot(query(collection(db,'chats',chatId,'messages'), orderBy('ts')), snap => cb(snap.docs.map(d => d.data()))); },
+    onMsgs(chatId, cb, onErr){ return onSnapshot(query(collection(db,'chats',chatId,'messages'), orderBy('ts')), snap => cb(snap.docs.map(d => d.data())), err => { console.error('chat', err); if (onErr) onErr(err); }); },
     async setRoom(id, room){ await setDoc(doc(db,'rooms',id), room); },
     async getRoom(id){ const s = await getDoc(doc(db,'rooms',id)); return s.exists() ? s.data() : null; },
     async updateRoom(id, patch){ await updateDoc(doc(db,'rooms',id), patch); },
@@ -585,7 +585,7 @@ function landingView(){
     <section class="lsec"><div class="sec">Populares esta semana</div><div class="lgrid">${row}</div></section>
     <section class="lsec feat">
       <div><h3>✨ Match con amigos</h3><p>Elegí con quiénes mirar algo y te decimos cuánto le puede gustar al grupo.</p></div>
-      <div><h3>🧬 Tu gemelo de gustos</h3><p>Encontrá a alguien que rankea como vos y mirá qué le gustó.</p></div>
+      <div><h3>💞 Tu alma gemela de películas</h3><p>Encontrá a alguien que rankea como vos y mirá qué le gustó.</p></div>
       <div><h3>🎮 Trivias en grupo</h3><p>¿Quién escribió esa reseña? Jugá con un enlace, sumá puntos y subí al podio.</p></div></section>
     <footer class="lfoot">${logo()}<div class="muted">${modeLine()}</div><div class="muted" style="font-size:11px">Versión 19/10 · inicio con portada</div></footer></div>`;
 }
@@ -636,7 +636,7 @@ function cell(m){
 }
 
 function appView(){
-  const tabs = [['home','🎬','Inicio'],['friends','👥','Amigos'],['match','✨','Match'],['twin','🧬','Gemelo'],['chat','💬','Chats']];
+  const tabs = [['home','🎬','Inicio'],['friends','👥','Amigos'],['match','✨','Match'],['twin','💞','Alma gemela'],['chat','💬','Chats']];
   let body = '';
   if (S.tab === 'home') body = homeTab();
   if (S.tab === 'friends') body = friendsTab();
@@ -657,7 +657,7 @@ function homeTab(){
     <div class="grid3" style="margin:14px 0 4px">
       <div class="card"><h2>${n}</h2><div class="muted">películas</div></div>
       <div class="card"><h2>${fr.length}</h2><div class="muted">amigos</div></div>
-      <div class="card"><h2>${tw ? Math.round(tw.s.sim*100)+'%' : '—'}</h2><div class="muted">afinidad con tu gemelo</div></div></div>
+      <div class="card"><h2>${tw ? Math.round(tw.s.sim*100)+'%' : '—'}</h2><div class="muted">afinidad con tu alma gemela</div></div></div>
     <div class="sec">Novedades de tus amigos</div>
     ${feed.length ? `<div class="feed">${feed.map(a => `<div class="fitem">${poster(a.movie.id)}<div class="cap"><b style="color:#fff">${esc(a.user.name)}</b> · <span style="color:var(--green)">${stars(a.stars)}</span><br>${esc(a.movie.title)}${a.ts ? `<br><span style="color:var(--low)">hace ${ago(a.ts)}</span>` : ''}</div></div>`).join('')}</div>`
       : `<div class="card muted">Todavía no hay novedades. <button class="lnk" data-act="tab" data-id="friends">Buscá a tus amigos por nombre de usuario</button>.</div>`}
@@ -674,7 +674,7 @@ function friendsTab(){
     .sort((a,b) => (b.username===q) - (a.username===q) || a.username.localeCompare(b.username)).slice(0,20) : [];
   const row = (u, kind) => {
     const s = similarity(S.me, u);
-    const btn = kind==='friend' ? `<button class="btn sm ghost" data-act="unfollow" data-id="${u.uid}">Quitar</button>`
+    const btn = kind==='friend' ? `<button class="btn sm" data-act="openChat" data-id="${u.uid}">💬 Chat</button><button class="btn sm ghost" data-act="unfollow" data-id="${u.uid}">Quitar</button>`
       : kind==='inc' ? `<button class="btn sm" data-act="follow" data-id="${u.uid}">Aceptar</button>`
       : kind==='sent' ? `<button class="btn sm ghost" data-act="unfollow" data-id="${u.uid}">Cancelar</button>`
       : `<button class="btn sm" data-act="follow" data-id="${u.uid}">Agregar</button>`;
@@ -731,7 +731,17 @@ function matchGames(){
 
 function twinTab(){
   const list = twins(S.me, allOthers());
-  if (!list.length) return `<h1>Tu gemelo de gustos</h1><p class="sub">Rankeá al menos 3 películas que otras personas también hayan visto para encontrar a alguien parecido a vos.</p>`;
+  if (!list.length){
+    const others = allOthers(), fr = myFriends();
+    const byFriends = myFriends().map(userOf).map(u => ({user:u, s:similarity(S.me,u)})).filter(x => x.s).sort((p,q) => q.s.sim - p.s.sim);
+    return `<h1>Tu alma gemela de películas</h1>
+      <p class="sub">Buscamos a la persona que <b style="color:#fff">no es tu amiga</b> y rankea más parecido a vos. Necesitan haber rankeado <b style="color:#fff">al menos 2 películas en común</b>.</p>
+      <div class="card"><h3>Todavía no hay una alma gemela</h3>
+        <p class="sub" style="margin-bottom:6px">Personas en GPD 2: <b style="color:#fff">${others.length}</b> · ya son tus amigas: <b style="color:#fff">${fr.length}</b> · películas que rankeaste: <b style="color:#fff">${rated(S.me).length}</b></p>
+        <p class="sub" style="margin:0">Probá rankear más películas (cuantas más, más chances de coincidir) o invitá a más gente a la app.</p>
+        <div style="margin-top:12px"><button class="btn" data-act="tab" data-id="home">Rankear más películas</button></div></div>
+      ${byFriends.length ? `<div class="sec">Afinidad con tus amigos</div><div class="people">${byFriends.map(t => `<div class="person">${av(t.user)}<div class="grow"><b>${esc(t.user.name)}</b><div class="muted">${t.s.common.length} en común</div></div><div class="pct" style="font-size:16px">${Math.round(t.s.sim*100)}%</div><button class="btn sm ghost" data-act="openChat" data-id="${t.user.uid}">💬</button></div>`).join('')}</div>` : ''}`;
+  }
   const card = (t, big) => {
     const u = t.user, recs = twinRecs(S.me, u);
     return `<div class="card" style="margin-bottom:12px"><div class="row">${av(u,big?'lg':'')}<div class="grow"><h2 style="margin:0">${esc(u.name)}</h2><div class="muted">${t.s.common.length} películas en común</div></div><div class="pct">${Math.round(t.s.sim*100)}%</div></div>
@@ -740,7 +750,7 @@ function twinTab(){
       ${recs.length ? `<div class="sec">Podrían interesarte</div><div class="grid" style="grid-template-columns:repeat(4,1fr)">${recs.slice(0,4).map(m => `<div>${poster(m.id)}<div class="cap">${esc(m.title)}</div></div>`).join('')}</div>` : ''}
       <div style="margin-top:14px;display:flex;gap:8px"><button class="btn" data-act="openChat" data-id="${u.uid}">💬 Hablar</button><button class="btn ghost" data-act="follow" data-id="${u.uid}">Agregar amigo</button></div></div>`;
   };
-  return `<h1>Tu gemelo de gustos</h1><p class="sub">Personas que no son tus amigos pero rankean como vos.</p>
+  return `<h1>Tu alma gemela de películas</h1><p class="sub">Personas que no son tus amigos pero rankean como vos.</p>
     <div class="cols"><div>${card(list[0], true)}</div><div>${list.slice(1,4).length ? '<div class="sec" style="margin-top:0">Otros parecidos</div>' + list.slice(1,4).map(t => `<div class="person" style="margin-bottom:8px">${av(t.user)}<div class="grow"><b>${esc(t.user.name)}</b></div><div class="pct" style="font-size:16px">${Math.round(t.s.sim*100)}%</div><button class="btn sm ghost" data-act="openChat" data-id="${t.user.uid}">Hablar</button></div>`).join('') : ''}</div></div>`;
 }
 
@@ -756,7 +766,7 @@ function chatTab(){
   }
   const ids = [...new Set([...myFriends(), ...(S.me.contacts||[])])].filter(id => U()[id]);
   return `<h1>Chats</h1><p class="sub">Tus amigos y las personas con las que hablaste.</p>
-    <div class="people">${ids.length ? ids.map(id => { const u = userOf(id); return `<div class="person" data-act="openChat" data-id="${id}">${av(u)}<b class="grow">${esc(u.name)}</b><span class="muted">${myFriends().includes(id)?'amigo':'gemelo'}</span></div>`; }).join('') : '<div class="muted">Todavía no tenés conversaciones.</div>'}</div>`;
+    <div class="people">${ids.length ? ids.map(id => { const u = userOf(id); return `<div class="person" data-act="openChat" data-id="${id}">${av(u)}<b class="grow">${esc(u.name)}</b><span class="muted">${myFriends().includes(id)?'amigo':'alma gemela'}</span></div>`; }).join('') : '<div class="card muted">Todavía no tenés conversaciones. Agregá amigos en la pestaña Amigos (con el botón 💬 podés chatear con cada uno) o hablale a tu alma gemela.</div>'}</div>`;
 }
 const msgsHTML = () => S.chat.msgs.map(m => `<div class="bub ${m.from===S.uid?'me':''}">${esc(m.text)}</div>`).join('');
 
@@ -944,12 +954,15 @@ async function openChat(uid){
   render();
   C.unsub = DB.onMsgs(chatId(S.uid, uid), msgs => {
     C.msgs = msgs; const el = $('#msgs'); if (el){ el.innerHTML = msgsHTML(); el.scrollTop = el.scrollHeight; }
+  }, err => {
+    const el = $('#msgs'); if (el) el.innerHTML = `<div class="err">No se pueden leer los mensajes: ${esc(err.code || err.message)}. ${err.code === 'permission-denied' ? 'Revisá que las reglas de Firestore incluyan la sección de chats.' : ''}</div>`;
   });
 }
 async function sendMsg(){
   const inp = $('#msgin'); const text = inp.value.trim(); if (!text) return; inp.value = '';
   const other = S.chat.with, cid = chatId(S.uid, other);
-  await DB.sendMsg(cid, {from:S.uid, text, ts:Date.now()});
+  try { await DB.sendMsg(cid, {from:S.uid, text, ts:Date.now()}); }
+  catch(e){ toast('No se pudo enviar: ' + (e.code || e.message)); const i2 = $('#msgin'); if (i2) i2.value = text; return; }
   const o = userOf(other);
   if (o.demo){
     const replies = ['¡Dale! Me parece buenísimo 🎬','Jaja yo también la vi, qué grande.','Anotada. ¿La vemos juntos esta semana?','Uh, no la vi todavía, pasame más.','Tenés buen gusto, la verdad.'];
