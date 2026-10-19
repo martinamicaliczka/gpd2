@@ -175,13 +175,25 @@ body{display:block;padding:0;background:var(--dark);min-height:100dvh}
 
 .notice{background:#10301f;border:1px solid var(--green);color:#d7ffe6;border-radius:10px;padding:11px 14px;margin:6px 0 12px;font:600 13px Inter}
 .okbadge{color:var(--green);font:700 12px Inter;white-space:nowrap}
-.tutov{z-index:90;background:rgba(0,0,0,.78)}.sheet.tut{text-align:center;padding:26px 22px}.tut-ic{font-size:44px;margin-bottom:6px}
-.dots{display:flex;gap:6px;justify-content:center;margin-top:14px}.dots i{width:7px;height:7px;border-radius:50%;background:#3a444d}.dots i.on{background:var(--green)}
 
 .top4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}.top4 .cap{font-size:10.5px;text-align:center;margin-top:4px}
 .poster.empty{display:flex;align-items:center;justify-content:center;background:var(--panel2);border:1.5px dashed var(--line);font-size:26px;color:var(--mid)}
 .poster.dim{opacity:.4}
 .frame.desktop .top4{max-width:460px}
+
+.tut-ic{font-size:44px;margin-bottom:6px}
+.dots{display:flex;gap:6px;justify-content:center;margin-top:14px}.dots i{width:7px;height:7px;border-radius:50%;background:#3a444d}.dots i.on{background:var(--green)}
+.tutov{position:absolute;inset:0;z-index:90;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;padding:18px}
+.tutcard{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px 20px;max-width:420px;width:100%;text-align:center}
+.tutcard h2{margin:0 0 6px}.tut-d{color:#fff;font-size:15px;margin:0 0 10px}.tut-step{color:var(--orange);font:700 11px Inter;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;min-height:0}
+.tut-todo{background:var(--panel2);border-radius:10px;padding:11px 13px;font-size:13.5px;line-height:1.45;color:#dfe6ec;text-align:left}
+.frame.mobile .tutov.spotlight{align-items:flex-end;padding-bottom:84px}
+.frame.desktop .tutov.spotlight{align-items:flex-start;padding-top:120px}
+.tabbar button.spot,.chip.spot{position:relative;z-index:95;background:var(--panel);color:#fff;box-shadow:0 0 0 2px var(--orange);border-radius:12px;animation:pulse 1.2s ease-in-out infinite}
+.chip.spot{padding:4px 8px}
+@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(255,128,0,.35)}}
+.agebox{display:flex;gap:10px;align-items:flex-start;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:12.5px;line-height:1.4;color:#dfe6ec;cursor:pointer}
+.agebox input{margin-top:3px;width:18px;height:18px;flex-shrink:0;accent-color:var(--orange)}
 </style></head>
 <body>
 <div class="stage"><div class="frame mobile" id="frame"><div style="color:#9ab;font:14px Inter,sans-serif;padding:40px;text-align:center">Cargando…</div></div></div>
@@ -783,20 +795,22 @@ function render(){
   const mg = f.querySelector('.msgs'); if (mg) mg.scrollTop = mg.scrollHeight;
 }
 const TUT = [
-  {tab:'home', ic:'🎬', t:'¡Bienvenido a GPD 2!', d:'Es una app para descubrir películas con tus amigos. En un minuto te mostramos cómo funciona.'},
-  {tab:'home', ic:'⭐', t:'Rankeá películas', d:'Tocá una portada para ponerle de 0.5 a 5 estrellas y, si querés, una reseña corta. Cuantas más rankees, mejores serán tus recomendaciones. Podés buscar, filtrar por categoría y pasar de página.'},
-  {tab:'friends', ic:'👥', t:'Agregá amigos', d:'Buscalos por su @usuario y mandales una solicitud. La amistad se confirma cuando los dos se agregan; verás el aviso "Solicitud enviada" y la persona aparece en "Solicitudes enviadas".'},
-  {tab:'match', ic:'✨', t:'Match con amigos', d:'Elegí con quiénes querés mirar algo y te decimos qué película le puede gustar a todo el grupo, con un porcentaje. También hay trivias para jugar juntos.'},
-  {tab:'twin', ic:'💞', t:'Alma gemela', d:'Buscamos a la persona que rankea más parecido a vos. Si no aparece nadie, puede que no hayas rankeado suficientes películas o que todavía no haya alguien con alta compatibilidad.'},
-  {tab:'chat', ic:'💬', t:'Chats', d:'Chateá con tus amigos y con tu alma gemela. Un globito te avisa cuando tenés mensajes pendientes y de quién vienen.'},
+  {ic:'🎬', t:'¡Bienvenido a GPD 2!', d:'Rankeás películas y la app te ayuda a elegir qué ver con tus amigos. Te mostramos las secciones en 30 segundos.'},
+  {tab:'home', t:'Inicio: rankeá películas', d:'Acá están todas las películas.', todo:'Tocá una portada, ponele estrellas (podés usar medias, ej. 3.5) y guardá. Cuantas más rankees, mejores recomendaciones.'},
+  {tab:'friends', t:'Amigos', d:'Para usar match, perfiles y chat necesitás amigos.', todo:'Buscá a alguien por su @usuario y tocá "Agregar". Cuando te acepte, ya son amigos: podés ver su perfil con su top 4 y chatear.'},
+  {tab:'match', t:'Match', d:'Para decidir qué ver en grupo.', todo:'Elegí a tus amigos y te decimos qué película les puede gustar a todos. Después podés jugar trivias juntos.'},
+  {tab:'twin', t:'Alma gemela', d:'Una persona que puntúa casi igual que vos.', todo:'Aparece sola cuando hay alguien compatible. Si no ves a nadie, rankeá más películas.'},
+  {tab:'chat', t:'Chats', d:'Hablá con tus amigos.', todo:'Un globito naranja te avisa cuando tenés mensajes sin leer y de quién son.'},
+  {chip:1, t:'Tu perfil', d:'Tocá tu nombre, arriba a la derecha.', todo:'Ahí elegís tu top 4 de películas favoritas, que ven tus amigos.'},
 ];
 function tutView(){
-  const i = S.tut, s = TUT[i], last = i === TUT.length - 1;
-  return `<div class="overlay tutov"><div class="sheet tut"><div class="tut-ic">${s.ic}</div><h2>${s.t}</h2><p class="sub">${s.d}</p>
+  const i = S.tut, s = TUT[i], last = i === TUT.length - 1, first = i === 0;
+  return `<div class="tutov ${s.tab||s.chip ? 'spotlight' : ''}"><div class="tutcard"><div class="tut-step">${first ? '' : `Paso ${i} de ${TUT.length-1}`}</div>
+    ${s.ic ? `<div class="tut-ic">${s.ic}</div>` : ''}<h2>${s.t}</h2><p class="tut-d">${s.d}</p>${s.todo ? `<div class="tut-todo">👉 ${s.todo}</div>` : ''}
     <div class="dots">${TUT.map((_, k) => `<i class="${k===i?'on':''}"></i>`).join('')}</div>
-    <div class="row" style="margin-top:14px">${last ? '' : '<button class="btn ghost" data-act="tutSkip">Saltar</button>'}<button class="btn grow" data-act="tutNext">${last ? '¡Empezar!' : 'Siguiente'}</button></div></div></div>`;
+    <div class="row" style="margin-top:14px">${first ? '<button class="btn ghost" data-act="tutSkip">Saltar</button>' : '<button class="btn ghost" data-act="tutPrev">Atrás</button>'}<button class="btn grow" data-act="tutNext">${last ? '¡Listo, empezar!' : first ? 'Ver cómo funciona' : 'Siguiente'}</button></div></div></div>`;
 }
-function tutGo(i){ S.tut = i; if (i != null && TUT[i]) S.tab = TUT[i].tab; render(); }
+function tutGo(i){ S.tut = i; S.prof = null; if (i != null && TUT[i] && TUT[i].tab) S.tab = TUT[i].tab; if (i != null && TUT[i] && TUT[i].chip) S.tab = 'home'; render(); }
 function tutEnd(){ S.tut = null; S.tab = 'home'; saveMe({tutorialDone:true}).catch(() => {}); render(); }
 function softRender(){
   const a = document.activeElement;
@@ -835,6 +849,7 @@ function authView(){
       <label class="muted">Contraseña${signup ? ' (mínimo 6 caracteres)' : ''}</label>
       <input class="inp" id="ap" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="••••••">
       ${signup ? `<label class="muted">Color de tu avatar</label><div class="swatches">${COLORS.map(c => `<button data-act="color" data-id="${c}" class="${d.color===c?'on':''}" style="background:${c}"></button>`).join('')}</div>` : ''}
+      ${signup ? `<label class="agebox"><input type="checkbox" id="aage" data-act="ageToggle" ${A.age?'checked':''}><span>Declaro que tengo <b>${MIN_AGE} años o más</b>, la edad mínima requerida en Argentina para tener una cuenta en una red social con chat.</span></label>` : ''}
       ${A.err ? `<div class="err">${esc(A.err)}</div>` : ''}
       <button class="btn block" data-act="doAuth" ${A.busy?'disabled':''}>${A.busy ? 'Un momento…' : signup ? 'Crear cuenta' : 'Entrar'}</button>
       <button class="lnk" data-act="goAuth" data-id="${signup ? 'login' : 'signup'}">${signup ? '¿Ya tenés cuenta? Iniciá sesión' : '¿No tenés cuenta? Creala'}</button>
@@ -852,19 +867,23 @@ function onboardView(){
 }
 const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 const filterBox = () => `<input class="inp" id="gq" type="search" placeholder="🔍 Buscar película por título, año o género" value="${esc(S.gridQ||'')}" style="margin:6px 0 12px">`;
-const PAGE_SIZE = 12;
+const MIN_AGE = 13;   // edad mínima para registrarse (ajustable)
+const PAGE_SIZE = 24;
 const gridList = () => {
   const q = norm(S.gridQ||'').trim();
   return [...MOVIES].sort((x,y) => norm(x.title).replace(/[^a-z0-9]/g,'').localeCompare(norm(y.title).replace(/[^a-z0-9]/g,''))).filter(m => BASE_IDS.includes(m.id) || (S.me.ratings||{})[m.id] > 0).filter(m => !q || norm(m.title).includes(q) || String(m.year).includes(q) || m.genres.some(g => norm(g).includes(q))).filter(m => !S.gridG || m.genres.includes(S.gridG));
 };
 const myGrid = () => {
-  const list = gridList(), pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const list = gridList();
+  if (S.view === 'onboard') return list.length ? list.map(cell).join('') : '<div class="muted" style="grid-column:1/-1">No encontramos esa película. Probá con otro nombre o categoría.</div>';   // al registrarse: todas, sin límite
+  const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   S.gridP = Math.min(Math.max(1, S.gridP || 1), pages);
   const part = list.slice((S.gridP-1)*PAGE_SIZE, S.gridP*PAGE_SIZE);
   return part.length ? part.map(cell).join('') : '<div class="muted" style="grid-column:1/-1">No encontramos esa película. Probá con otro nombre o categoría.</div>';
 };
 const genreBar = () => `<div class="gbar"><button class="pill ${!S.gridG?'like':''}" data-act="gfilter" data-id="">Todas</button>${GENRES.map(g => `<button class="pill ${S.gridG===g?'like':''}" data-act="gfilter" data-id="${g}">${g}</button>`).join('')}</div>`;
 const pager = () => {
+  if (S.view === 'onboard') return `<div class="muted" style="text-align:center;margin:10px 0">${gridList().length} películas disponibles</div>`;
   const n = gridList().length, pages = Math.ceil(n / PAGE_SIZE), p = S.gridP || 1;
   if (pages <= 1) return `<div class="muted" style="text-align:center;margin:10px 0">${n} película${n===1?'':'s'}</div>`;
   const show = []; for (let i = 1; i <= pages; i++) if (i === 1 || i === pages || Math.abs(i-p) <= 1) show.push(i);
@@ -932,9 +951,9 @@ function appView(){
   else if (S.tab === 'match') body = matchTab();
   else if (S.tab === 'twin') body = twinTab();
   else if (S.tab === 'chat') body = chatTab();
-  return `<div class="head">${logo()}<div class="chip" data-act="profile" data-id="${S.uid}" style="cursor:pointer">${esc(S.me.name)} ${av(S.me,'sm')}<button class="btn sm ghost" data-act="logout">Salir</button></div></div>
+  return `<div class="head">${logo()}<div class="chip ${S.tut!=null && TUT[S.tut] && TUT[S.tut].chip?'spot':''}" data-act="profile" data-id="${S.uid}" style="cursor:pointer">${esc(S.me.name)} ${av(S.me,'sm')}<button class="btn sm ghost" data-act="logout">Salir</button></div></div>
     <div class="main">${body}</div>${S.pick != null ? pickView() : ''}
-    <div class="tabbar">${tabs.map(t => `<button data-act="tab" data-id="${t[0]}" class="${S.tab===t[0]?'on':''}"><span>${t[1]}${t[0]==='chat' && unreadTotal() ? `<i class="nbadge">${unreadTotal()}</i>` : ''}</span>${t[2]}</button>`).join('')}</div>`;
+    <div class="tabbar">${tabs.map(t => `<button data-act="tab" data-id="${t[0]}" class="${S.tab===t[0]?'on':''} ${S.tut!=null && TUT[S.tut] && TUT[S.tut].tab===t[0]?'spot':''}"><span>${t[1]}${t[0]==='chat' && unreadTotal() ? `<i class="nbadge">${unreadTotal()}</i>` : ''}</span>${t[2]}</button>`).join('')}</div>`;
 }
 
 function homeTab(){
@@ -1132,11 +1151,12 @@ async function doAuth(){
   A.u = username;
   if (!validUsername(username)) { A.err = 'El usuario debe tener de 3 a 16 caracteres: letras minúsculas, números, _ o .'; return render(); }
   if (pass.length < 6) { A.err = 'La contraseña debe tener al menos 6 caracteres.'; return render(); }
+  if (signup && !A.age) { A.err = `Para crear tu cuenta tenés que confirmar que tenés ${MIN_AGE} años o más.`; return render(); }
   A.err = ''; A.busy = true; render();
   try {
     S.uid = signup ? await DB.signUp(username, pass) : await DB.signIn(username, pass);
     S.freshSignup = signup;
-    if (signup) await DB.setUser(S.uid, {uid:S.uid, username, name:username, color:S.draft.color, ratings:{}, ratedAt:{}, reviews:{}, friends:[], contacts:[], created:Date.now()});
+    if (signup) await DB.setUser(S.uid, {uid:S.uid, username, name:username, color:S.draft.color, ratings:{}, ratedAt:{}, reviews:{}, friends:[], contacts:[], ageConfirmed:MIN_AGE, created:Date.now()});
     A.busy = false; await startSession();
   } catch(e){
     A.busy = false; A.err = AUTH_ERR[e && (e.code || '')] || ('No se pudo completar: ' + ((e && (e.code || e.message)) || e)); render();
@@ -1336,6 +1356,7 @@ document.addEventListener('click', async e => {
   if (t.classList.contains('overlay') && e.target.closest('[data-stop]')) return;
   const act = t.dataset.act, id = t.dataset.id;
   switch (act){
+    case 'ageToggle': S.auth.age = t.checked; break;
     case 'color': { const u = $('#au').value, p = $('#ap').value; S.draft.color = id; render(); $('#au').value = u; $('#ap').value = p; break; }
     case 'goAuth': S.auth = {mode:id, err:'', busy:false, u:(S.auth&&S.auth.u)||''}; S.view = 'auth'; render(); break;
     case 'goLanding': S.view = 'landing'; render(); break;
@@ -1360,6 +1381,7 @@ document.addEventListener('click', async e => {
     case 'tutNext': if (S.tut >= TUT.length - 1) tutEnd(); else tutGo(S.tut + 1); break;
     case 'tutSkip': tutEnd(); break;
     case 'tutOpen': tutGo(0); break;
+    case 'tutPrev': tutGo(Math.max(0, S.tut - 1)); break;
     case 'gfilter': S.gridG = id || ''; S.gridP = 1; render(); break;
     case 'gpage': S.gridP = +id; render(); { const g = $('#gq'); if (g) g.scrollIntoView({block:'start'}); } break;
     case 'profile': S.prof = id; S.profN = PROF_STEP; render(); { const m = $('.main'); if (m) m.scrollTop = 0; } break;
