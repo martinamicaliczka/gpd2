@@ -88,7 +88,7 @@ h1{font:700 26px Outfit}h2{font:700 20px Outfit;margin-bottom:4px}h3{font:600 15
 .frame.desktop .sheet{border-radius:20px}
 @keyframes up{from{transform:translateY(40px);opacity:0}}
 .starpick{display:flex;gap:6px;justify-content:center;margin:14px 0}
-.starpick button{font-size:34px;color:#3a444d;line-height:1}.starpick button.on{color:var(--green)}
+.starpick .sp{position:relative;font-size:38px;color:#3a444d;line-height:1;display:inline-block}.starpick .sp.on{color:var(--green)}.starpick .sp.half{background:linear-gradient(90deg,var(--green) 50%,#3a444d 50%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}.starpick .sp button{position:absolute;top:0;bottom:0;width:50%;background:none;border:0;cursor:pointer}.starpick .sp button:first-of-type{left:0}.starpick .sp button:last-of-type{right:0}
 textarea,.inp{width:100%;background:var(--dark);border:1px solid var(--line);border-radius:10px;color:#fff;padding:11px 12px;font-size:14px;outline:none}
 textarea{resize:none;height:76px}textarea:focus,.inp:focus{border-color:var(--orange)}
 /* welcome */
@@ -557,7 +557,7 @@ function lbItems(rows){
   return rows.slice(1).map(r => ({name:(r[iN]||'').trim(), year:parseInt(r[iY])||0, rating:parseFloat(r[iR]), ts:Date.parse(r[iD]) || 0}))
     .filter(x => x.name && x.rating > 0);
 }
-const lbStars = r => Math.max(1, Math.min(5, Math.round(r)));   // 0.5→1, 3.5→4
+const lbStars = r => Math.max(0.5, Math.min(5, Math.round(r * 2) / 2));   // conserva medias estrellas: 3.5→3.5
 /* Busca la película en el catálogo por título (inglés o español) y año (±1) */
 function lbFind(name, year){
   const n = normTitle(name);
@@ -733,7 +733,7 @@ const userOf = uid => U()[uid] || {uid, name:'Alguien', color:'#556', ratings:{}
 const allOthers = () => Object.values(U()).filter(u => u.uid !== S.uid);
 const poster = (id, cls='', attr='') => `<div class="poster ${cls}" ${attr} style="background-image:url(${posterURL(id)})"></div>`;
 const av = (u, cls='') => `<div class="av ${cls}" style="background:${u.color}">${esc((u.name||'?')[0].toUpperCase())}</div>`;
-const stars = n => '★'.repeat(n) + '☆'.repeat(5-n);
+const stars = n => { const f = Math.floor(n), h = n - f >= .5 ? 1 : 0; return '★'.repeat(f) + (h ? '½' : '') + '☆'.repeat(5 - f - h); };
 const chatId = (a,b) => [a,b].sort().join('|');
 const logo = (big) => `<span class="logo ${big?'big':''}">GPD<b>2</b></span>`;
 const unreadOf = t => (t && t.unread && S.uid && t.unread[S.uid]) || 0;
@@ -1012,7 +1012,8 @@ function sheetView(){
   const sh = S.sheet, m = MOVIE[sh.id];
   return `<div class="overlay" data-act="closeSheet"><div class="sheet" data-stop="1">
     <div class="row">${poster(sh.id)}<div class="grow"><h2>${esc(m.title)}</h2><div class="muted">${m.year} · ${m.genres.join(', ')}</div></div></div>
-    <div class="starpick">${[1,2,3,4,5].map(i => `<button data-act="star" data-id="${i}" class="${sh.stars>=i?'on':''}">★</button>`).join('')}</div>
+    <div class="starpick">${[1,2,3,4,5].map(i => `<span class="sp ${sh.stars>=i?'on':(sh.stars>=i-.5?'half':'')}">★<button data-act="star" data-id="${i-.5}" aria-label="${i-.5} estrellas"></button><button data-act="star" data-id="${i}" aria-label="${i} estrellas"></button></span>`).join('')}</div>
+    <div class="muted" style="text-align:center">${sh.stars ? sh.stars + ' de 5' : 'Tocá la mitad izquierda o derecha de cada estrella (ej. 3.5)'}</div>
     <textarea id="rtext" maxlength="160" placeholder="Reseña corta (opcional). Se usa de forma anónima en las trivias.">${esc(sh.text)}</textarea>
     <div class="row" style="margin-top:12px"><button class="btn grow" data-act="saveRating" ${sh.stars?'':'disabled'}>Guardar</button>${(S.me.ratings||{})[sh.id] ? '<button class="btn ghost" data-act="delRating">Quitar</button>' : ''}</div></div></div>`;
 }
