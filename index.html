@@ -107,7 +107,7 @@ textarea{resize:none;height:76px}textarea:focus,.inp:focus{border-color:var(--or
 .review{font:500 17px/1.5 Outfit;background:var(--panel);border-left:4px solid var(--orange);border-radius:10px;padding:16px;margin:10px 0}
 .opt{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:8px;font:600 14px Inter}
 .opt.ok{background:#10301f;border-color:var(--green)}.opt.bad{background:#33181a;border-color:#ff5a5a}.opt.dim{opacity:.45}
-.coverbox{width:150px;margin:0 auto 12px}.coverbox .poster{cursor:default;transition:filter .9s ease}
+.coverbox{width:200px;margin:0 auto 12px}.coverbox .poster{cursor:default;transition:filter .9s ease}
 .podium{display:flex;align-items:flex-end;justify-content:center;gap:10px;margin:18px 0 8px;height:190px}
 .podium .col{display:flex;flex-direction:column;align-items:center;gap:6px;width:84px}
 .podium .blk{width:100%;border-radius:8px 8px 0 0;background:var(--panel2);display:flex;align-items:flex-start;justify-content:center;padding-top:8px;font:700 20px Outfit}
@@ -160,6 +160,13 @@ body{display:block;padding:0;background:var(--dark);min-height:100dvh}
 .feat{display:grid;grid-template-columns:1fr;gap:14px}.frame.desktop .feat{grid-template-columns:repeat(3,1fr);gap:28px}
 .feat h3{font:600 17px Outfit;margin-bottom:6px}.feat p{color:var(--mid);font-size:13.5px;line-height:1.5}
 .lfoot{display:flex;flex-direction:column;align-items:center;gap:8px;padding:34px 20px;border-top:1px solid var(--line);margin-top:20px}
+
+.tabbar button span{position:relative;display:inline-block}
+.nbadge{position:absolute;top:-6px;right:-12px;background:#ff4d4d;color:#fff;font:700 10px/16px Inter,sans-serif;font-style:normal;min-width:16px;height:16px;border-radius:8px;padding:0 4px;text-align:center}
+.count{background:#ff4d4d;color:#fff;font:700 12px Inter,sans-serif;min-width:22px;height:22px;line-height:22px;border-radius:11px;text-align:center;padding:0 6px}
+.person.unread{border-color:#ff4d4d55;background:#2a1d20}
+
+@media(min-width:900px){.coverbox{width:240px}}
 </style></head>
 <body>
 <div class="stage"><div class="frame mobile" id="frame"><div style="color:#9ab;font:14px Inter,sans-serif;padding:40px;text-align:center">Cargando…</div></div></div>
@@ -396,7 +403,53 @@ function popular(users, n=6){
 }
 const validUsername = s => /^[a-z0-9_.]{3,16}$/.test(s);
 
-if (typeof module !== 'undefined') module.exports = {activityFeed, popular, validUsername, BASE_IDS, registerMovie, fromTmdb, friendCode, isMutual, incomingRequests, sentRequests, MOVIES, MOVIE, GENRES, DEMO_USERS, COLORS, predict, groupRecs, similarity, twins, twinRecs, twinBanner, genreMeans, buildReviewQuestions, buildColorQuestions, leaderboard, rated};
+
+/* ===== Importar calificaciones exportadas de Letterboxd (ratings.csv) ===== */
+const ALIASES = {parasite:['Parasite'],eeaao:['Everything Everywhere All at Once'],whiplash:['Whiplash'],lalaland:['La La Land'],budapest:['The Grand Budapest Hotel'],memories:['Memories of Murder'],burning:['Burning'],aftersun:['Aftersun'],oldboy:['Oldboy'],gravity:['Gravity'],hailmary:['Project Hail Mary'],arrival:['Arrival'],spiderman:['Spider-Man: Brand New Day'],truman:['The Truman Show'],mammamia:['Mamma Mia!'],matrix:['The Matrix'],shrek:['Shrek'],abouttime:['About Time'],crazystupid:['Crazy, Stupid, Love.','Crazy, Stupid, Love'],coraline:['Coraline'],toystory:['Toy Story'],toystory3:['Toy Story 3'],toystory4:['Toy Story 4'],toystory5:['Toy Story 5'],obsesion:['Obsession'],howtolose:['How to Lose a Guy in 10 Days'],americanpsycho:['American Psycho'],fightclub:['Fight Club'],meangirls:['Mean Girls'],psycho:['Psycho'],guardians:['Guardians of the Galaxy'],pulpfiction:['Pulp Fiction'],monsters:['Monsters, Inc.'],scream:['Scream'],avatar:['Avatar: Fire and Ash'],novicia:['The Sound of Music'],inception:['Inception'],spirited:['Spirited Away'],tenthings:['10 Things I Hate About You'],notebook:['The Notebook'],pastlives:['Past Lives'],interstellar:['Interstellar'],getout:['Get Out'],eternity:['Eternity'],endgame:['Avengers: Endgame'],fiftyshades:['Fifty Shades of Grey'],shrek2:['Shrek 2'],shrek3:['Shrek the Third'],fastfive:['Fast Five'],rubias:['White Chicks'],wicked:['Wicked'],princesa:['The Princess Diaries'],diablo:['The Devil Wears Prada']};
+const normTitle = s => String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/&/g,' and ').replace(/[^a-z0-9]+/g,' ').trim();
+
+/* CSV con comillas, comas y saltos de línea dentro de campos */
+function parseCSV(text){
+  text = String(text||'').replace(/^﻿/,'');
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++){
+    const c = text[i];
+    if (q){ if (c === '"'){ if (text[i+1] === '"'){ cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === ','){ row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r'){ if (c === '\r' && text[i+1] === '\n') i++; row.push(cur); cur = ''; if (row.some(x => x !== '')) rows.push(row); row = []; }
+    else cur += c;
+  }
+  row.push(cur); if (row.some(x => x !== '')) rows.push(row);
+  return rows;
+}
+/* filas -> [{name, year, rating, ts}] (rating 0.5–5 en medios puntos) */
+function lbItems(rows){
+  if (!rows.length) return [];
+  const h = rows[0].map(x => x.trim().toLowerCase());
+  const ix = k => h.indexOf(k);
+  const iN = ix('name'), iY = ix('year'), iR = ix('rating'), iD = ix('date');
+  if (iN < 0 || iR < 0) throw new Error('No parece un ratings.csv de Letterboxd (faltan las columnas Name y Rating).');
+  return rows.slice(1).map(r => ({name:(r[iN]||'').trim(), year:parseInt(r[iY])||0, rating:parseFloat(r[iR]), ts:Date.parse(r[iD]) || 0}))
+    .filter(x => x.name && x.rating > 0);
+}
+const lbStars = r => Math.max(1, Math.min(5, Math.round(r)));   // 0.5→1, 3.5→4
+/* Busca la película en el catálogo por título (inglés o español) y año (±1) */
+function lbFind(name, year){
+  const n = normTitle(name);
+  for (const m of MOVIES){
+    const names = [m.title, ...(ALIASES[m.id]||[])].map(normTitle);
+    if (names.includes(n) && (!year || !m.year || Math.abs(m.year - year) <= 1)) return m;
+  }
+  return null;
+}
+function lbMatch(items){
+  const matched = [], unmatched = [];
+  items.forEach(it => { const m = lbFind(it.name, it.year); (m ? matched.push({id:m.id, stars:lbStars(it.rating), ts:it.ts}) : unmatched.push(it)); });
+  return {matched, unmatched};
+}
+
+if (typeof module !== 'undefined') module.exports = {parseCSV, lbItems, lbMatch, lbFind, lbStars, normTitle, activityFeed, popular, validUsername, BASE_IDS, registerMovie, fromTmdb, friendCode, isMutual, incomingRequests, sentRequests, MOVIES, MOVIE, GENRES, DEMO_USERS, COLORS, predict, groupRecs, similarity, twins, twinRecs, twinBanner, genreMeans, buildReviewQuestions, buildColorQuestions, leaderboard, rated};
 
 /* ===== GPD 2 · capa de datos: Firebase (Firestore + auth anónima) o modo local ===== */
 /* Pegá acá la config de tu proyecto Firebase (Configuración del proyecto > Tus apps > Web). Si queda en null, funciona en modo local. */
@@ -425,7 +478,7 @@ function LocalDB(){
   const KEY = 'gpd2_v1';
   const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch(e){ return {}; } };
   const write = d => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e){} };
-  const base = () => { const d = read(); d.users = d.users||{}; d.chats = d.chats||{}; d.rooms = d.rooms||{}; d.movies = d.movies||{}; d.accounts = d.accounts||{}; return d; };
+  const base = () => { const d = read(); d.users = d.users||{}; d.chats = d.chats||{}; d.rooms = d.rooms||{}; d.movies = d.movies||{}; d.accounts = d.accounts||{}; d.threads = d.threads||{}; return d; };
   const listeners = new Set();
   const fire = () => listeners.forEach(f => f());
   window.addEventListener('storage', e => { if (e.key === KEY) fire(); });
@@ -450,6 +503,13 @@ function LocalDB(){
     async setUser(uid, data){ const d = base(); d.users[uid] = data; write(d); fire(); },
     async updateUser(uid, patch){ const d = base(); const u = d.users[uid] || {}; for (const k in patch) setPath(u, k, patch[k]); d.users[uid] = u; write(d); fire(); },
     onUsers(cb){ const f = () => cb(Object.values(base().users)); listeners.add(f); f(); return () => listeners.delete(f); },
+    async touchThread(chatId, from, to, text){
+      const d = base(); const t = d.threads[chatId] || {users:[from,to], unread:{}};
+      t.users = [from, to]; t.unread = t.unread || {}; t.unread[to] = (t.unread[to] || 0) + 1;
+      t.lastText = text.slice(0,120); t.lastFrom = from; t.lastTs = Date.now(); d.threads[chatId] = t; write(d); fire();
+    },
+    async markRead(chatId, uid){ const d = base(); const t = d.threads[chatId]; if (t && t.unread && t.unread[uid]){ t.unread[uid] = 0; write(d); fire(); } },
+    onThreads(uid, cb){ const f = () => cb(Object.entries(base().threads).filter(([id,t]) => t.users.includes(uid)).map(([id,t]) => Object.assign({id}, t))); listeners.add(f); f(); return () => listeners.delete(f); },
     async setMovie(id, m){ const d = base(); if(!d.movies[id]){ d.movies[id] = m; write(d); fire(); } },
     onMovies(cb){ const f = () => cb(Object.values(base().movies)); listeners.add(f); f(); return () => listeners.delete(f); },
     async sendMsg(chatId, msg){ const d = base(); (d.chats[chatId] = d.chats[chatId] || []).push(msg); write(d); fire(); },
@@ -472,7 +532,7 @@ async function FirebaseDB(cfg){
   const {createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut: fbSignOut, onAuthStateChanged} = authM;
   const mail = u => u + '@gpd2.app';
   const {deleteDoc} = fsM, {deleteUser} = authM;
-  const {doc, getDoc, setDoc, updateDoc, onSnapshot, collection, addDoc, query, orderBy} = fsM;
+  const {doc, getDoc, setDoc, updateDoc, onSnapshot, collection, addDoc, query, orderBy, where, increment} = fsM;
 
   return {
     mode:'firebase',
@@ -489,6 +549,11 @@ async function FirebaseDB(cfg){
     async setUser(uid, data){ await setDoc(doc(db,'users',uid), data); },
     async updateUser(uid, patch){ await updateDoc(doc(db,'users',uid), patch); },
     onUsers(cb, onErr){ return onSnapshot(collection(db,'users'), snap => cb(snap.docs.map(d => d.data())), err => { console.error('users', err); if (onErr) onErr(err); }); },
+    async touchThread(chatId, from, to, text){
+      await setDoc(doc(db,'threads',chatId), {users:[from,to], lastText:text.slice(0,120), lastFrom:from, lastTs:Date.now(), unread:{[to]: increment(1)}}, {merge:true});
+    },
+    async markRead(chatId, uid){ try { await updateDoc(doc(db,'threads',chatId), {['unread.' + uid]: 0}); } catch(e){} },
+    onThreads(uid, cb, onErr){ return onSnapshot(query(collection(db,'threads'), where('users','array-contains',uid)), snap => cb(snap.docs.map(x => Object.assign({id:x.id}, x.data()))), err => { console.error('threads', err); if (onErr) onErr(err); }); },
     async setMovie(id, m){ await setDoc(doc(db,'movies',id), m); },
     onMovies(cb){ return onSnapshot(collection(db,'movies'), snap => cb(snap.docs.map(d => d.data()))); },
     async sendMsg(chatId, msg){ await addDoc(collection(db,'chats',chatId,'messages'), msg); },
@@ -518,6 +583,14 @@ async function tmdbSearch(q){
   return ((await r.json()).results || []).filter(x => x.poster_path).slice(0,12).map(fromTmdb);
 }
 
+async function tmdbFind(title, year){
+  if (!TMDB_TOKEN) return null;
+  const r = await fetch('https://api.themoviedb.org/3/search/movie?include_adult=false&language=es-AR&query=' + encodeURIComponent(title) + (year ? '&year=' + year : ''), {headers:{Authorization:'Bearer ' + TMDB_TOKEN, accept:'application/json'}});
+  if (!r.ok) return null;
+  const x = ((await r.json()).results || []).find(z => z.poster_path);
+  return x ? fromTmdb(x) : null;
+}
+
 /* ===== GPD 2 · interfaz ===== */
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -526,7 +599,7 @@ const S = {
   view:'landing', tab:'home', device:'mobile', uid:null, me:null, real:{},
   match:{stage:'pick', sel:[], genres:{}, recs:[], group:[]},
   chat:{with:null, msgs:[], unsub:null}, sheet:null, room:null, roomUnsub:null, q:{stage:1, picked:null, pts:0},
-  draft:{color:COLORS[0]}, auth:{mode:'signup', err:'', busy:false}, unsubs:[], pendingRoom:null, toast:null, bots:null,
+  draft:{color:COLORS[0]}, threads:{}, prevUnread:{}, threadsReady:false, auth:{mode:'signup', err:'', busy:false}, unsubs:[], pendingRoom:null, toast:null, bots:null,
 };
 
 const DEMO = /[?&]demo\b/.test(location.search);   // ?demo suma usuarios de ejemplo para probar a solas
@@ -539,12 +612,23 @@ const av = (u, cls='') => `<div class="av ${cls}" style="background:${u.color}">
 const stars = n => '★'.repeat(n) + '☆'.repeat(5-n);
 const chatId = (a,b) => [a,b].sort().join('|');
 const logo = (big) => `<span class="logo ${big?'big':''}">GPD<b>2</b></span>`;
+const unreadOf = t => (t && t.unread && S.uid && t.unread[S.uid]) || 0;
+const unreadTotal = () => Object.values(S.threads).reduce((s, t) => s + unreadOf(t), 0);
+const otherOf = t => t.users.find(x => x !== S.uid);
+function updateBadge(){
+  const n = unreadTotal(); document.title = (n ? '(' + n + ') ' : '') + 'GPD 2';
+  const sp = document.querySelector('.tabbar [data-id=chat] span'); if (!sp) return;
+  const old = sp.querySelector('.nbadge'); if (old) old.remove();
+  if (n){ const b = document.createElement('i'); b.className = 'nbadge'; b.textContent = n; sp.appendChild(b); }
+}
 const myFriends = () => (S.me.friends||[]).filter(id => U()[id] && isMutual(S.me, U()[id]));
 S.search = {q:'', res:[], busy:false, err:''};
 
 function toast(msg){
-  S.toast = msg; render();
-  clearTimeout(toast.t); toast.t = setTimeout(() => { S.toast = null; const t = document.querySelector('.toast'); if (t) t.remove(); }, 2200);
+  const f = $('#frame'); if (!f) return;
+  clearTimeout(toast.t); const old = f.querySelector('.toast'); if (old) old.remove();
+  const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; f.appendChild(el);
+  toast.t = setTimeout(() => el.remove(), 3000);
 }
 
 /* ---------- Render ---------- */
@@ -611,7 +695,7 @@ function onboardView(){
   const fresh = S.freshSignup;
   return `<div class="main"><button class="back" data-act="onbBack">← ${fresh ? 'Volver (cancela el registro)' : 'Salir'}</button><h1>Rankeá películas</h1>
     <p class="sub">Tocá una portada para ponerle estrellas (y una reseña corta si querés). Con 5 ya podemos recomendarte.</p>
-    ${searchBox()}${filterBox()}<div class="grid">${myGrid()}</div>
+    ${importBox()}${searchBox()}${filterBox()}<div class="grid">${myGrid()}</div>
     <div style="position:sticky;bottom:-8px;padding-top:16px;background:linear-gradient(transparent,var(--dark) 40%)">
       <button class="btn block" data-act="finishOnboard" ${n<5?'disabled':''}>${n<5 ? `Faltan ${5-n} películas` : 'Continuar'}</button></div></div>`;
 }
@@ -622,6 +706,13 @@ const myGrid = () => {
   const list = MOVIES.filter(m => BASE_IDS.includes(m.id) || (S.me.ratings||{})[m.id] > 0).filter(m => !q || norm(m.title).includes(q) || m.genres.some(g => norm(g).includes(q)));
   return list.length ? list.map(cell).join('') : '<div class="muted" style="grid-column:1/-1">No hay películas con ese filtro.</div>';
 };
+function importBox(){
+  const msg = S.importMsg;
+  return `<div class="card" style="margin:6px 0 14px"><h3>¿Ya usás Letterboxd? Importá tus calificaciones</h3>
+    <p class="sub" style="margin:6px 0 10px">Así no tenés que rankear de nuevo. En letterboxd.com entrá a <b style="color:#fff">Settings &gt; Import &amp; Export &gt; Export your data</b>, descargá el archivo y subilo acá (sirve el .zip o el <b style="color:#fff">ratings.csv</b>). El archivo se lee en tu navegador y solo se guardan tus calificaciones.</p>
+    <label class="btn sm" for="lbfile" style="display:inline-block">Elegir archivo</label><input type="file" id="lbfile" accept=".csv,.zip" hidden>
+    ${msg ? `<div class="hint" style="margin-top:10px">${esc(msg)}</div>` : ''}</div>`;
+}
 function searchBox(){
   if (!TMDB_TOKEN) return '';
   const R = S.search;
@@ -645,7 +736,7 @@ function appView(){
   if (S.tab === 'chat') body = chatTab();
   return `<div class="head">${logo()}<div class="chip">${esc(S.me.name)} ${av(S.me,'sm')}<button class="btn sm ghost" data-act="logout">Salir</button></div></div>
     <div class="main">${body}</div>
-    <div class="tabbar">${tabs.map(t => `<button data-act="tab" data-id="${t[0]}" class="${S.tab===t[0]?'on':''}"><span>${t[1]}</span>${t[2]}</button>`).join('')}</div>`;
+    <div class="tabbar">${tabs.map(t => `<button data-act="tab" data-id="${t[0]}" class="${S.tab===t[0]?'on':''}"><span>${t[1]}${t[0]==='chat' && unreadTotal() ? `<i class="nbadge">${unreadTotal()}</i>` : ''}</span>${t[2]}</button>`).join('')}</div>`;
 }
 
 function homeTab(){
@@ -663,7 +754,7 @@ function homeTab(){
       : `<div class="card muted">Todavía no hay novedades. <button class="lnk" data-act="tab" data-id="friends">Buscá a tus amigos por nombre de usuario</button>.</div>`}
     ${pop.length ? `<div class="sec">Populares entre vos y tus amigos</div><div class="feed">${pop.map(p => `<div class="fitem">${poster(p.movie.id)}<div class="cap"><b style="color:#fff">${esc(p.movie.title)}</b><br><span style="color:var(--green)">${p.avg.toFixed(1)} ★</span> · ${p.n} ${p.n===1?'persona':'personas'}</div></div>`).join('')}</div>` : ''}
     <div class="sec">Tus películas</div>
-    ${searchBox()}${filterBox()}<div class="grid">${myGrid()}</div>`;
+    ${importBox()}${searchBox()}${filterBox()}<div class="grid">${myGrid()}</div>`;
 }
 
 function friendsTab(){
@@ -764,9 +855,16 @@ function chatTab(){
       <div class="msgs" id="msgs">${msgsHTML()}</div>
       <div class="send"><input class="inp" id="msgin" placeholder="Escribí un mensaje…" autocomplete="off"><button class="btn" data-act="send">Enviar</button></div></div>`;
   }
-  const ids = [...new Set([...myFriends(), ...(S.me.contacts||[])])].filter(id => U()[id]);
-  return `<h1>Chats</h1><p class="sub">Tus amigos y las personas con las que hablaste.</p>
-    <div class="people">${ids.length ? ids.map(id => { const u = userOf(id); return `<div class="person" data-act="openChat" data-id="${id}">${av(u)}<b class="grow">${esc(u.name)}</b><span class="muted">${myFriends().includes(id)?'amigo':'alma gemela'}</span></div>`; }).join('') : '<div class="card muted">Todavía no tenés conversaciones. Agregá amigos en la pestaña Amigos (con el botón 💬 podés chatear con cada uno) o hablale a tu alma gemela.</div>'}</div>`;
+  const ids = [...new Set([...myFriends(), ...(S.me.contacts||[]), ...Object.values(S.threads).map(otherOf)])].filter(id => U()[id]);
+  const rows = ids.map(id => ({id, u:userOf(id), t:S.threads[chatId(S.uid, id)]}))
+    .sort((p, q) => unreadOf(q.t) - unreadOf(p.t) || ((q.t && q.t.lastTs) || 0) - ((p.t && p.t.lastTs) || 0));
+  const total = unreadTotal(), people = rows.filter(r => unreadOf(r.t) > 0).length;
+  return `<h1>Chats</h1>
+    ${total ? `<div class="banner" style="font-size:14px">💬 Tenés <b>${total}</b> ${total === 1 ? 'mensaje pendiente' : 'mensajes pendientes'} de <b>${people}</b> ${people === 1 ? 'persona' : 'personas'}.</div>` : '<p class="sub">Tus amigos y las personas con las que hablaste. No tenés mensajes pendientes.</p>'}
+    <div class="people">${rows.length ? rows.map(r => { const n = unreadOf(r.t), isFriend = myFriends().includes(r.id);
+      const prev = r.t && r.t.lastText ? `${r.t.lastFrom === S.uid ? 'Vos: ' : ''}${esc(r.t.lastText)}` : (isFriend ? 'Amigo' : 'Alma gemela');
+      return `<div class="person ${n ? 'unread' : ''}" data-act="openChat" data-id="${r.id}">${av(r.u)}<div class="grow"><b>@${esc(r.u.username || r.u.name)}</b><div class="muted" style="${n ? 'color:#fff;font-weight:600;' : ''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${prev}</div></div>${n ? `<span class="count">${n}</span>` : ''}</div>`; }).join('')
+      : '<div class="card muted">Todavía no tenés conversaciones. Agregá amigos en la pestaña Amigos (con el botón 💬 podés chatear con cada uno) o hablale a tu alma gemela.</div>'}</div>`;
 }
 const msgsHTML = () => S.chat.msgs.map(m => `<div class="bub ${m.from===S.uid?'me':''}">${esc(m.text)}</div>`).join('');
 
@@ -802,14 +900,13 @@ function questionHTML(q, r){
   const Q = S.q, m = MOVIE[q.movie];
   const revealed = Q.picked !== null;
   if (q.type === 'review'){
-    if (q.author === S.uid) return `<div class="card"><h3>Esta reseña es tuya 😉</h3><p class="sub">Los demás intentan adivinar quién la escribió. Pasá a la siguiente.</p>${poster(q.movie)}</div><div style="margin-top:12px"><button class="btn block" data-act="nextQ">Siguiente</button></div>`;
     return `<div class="row">${poster(q.movie)}<div><b>${esc(m.title)}</b><div class="muted">${m.year}</div></div></div>
       <div class="review">“${esc(q.text)}”</div>
       ${q.options.map(uid => { const u = userOf(uid); let c = ''; if (revealed){ c = uid === q.author ? 'ok' : (uid === Q.picked ? 'bad' : 'dim'); } return `<button class="opt ${c}" data-act="pick" data-id="${uid}" ${revealed?'disabled':''}>${av(u,'sm')}${esc(u.name)}</button>`; }).join('')}
       ${revealed ? `<div class="hint">${Q.picked===q.author ? '¡Correcto! +2 puntos' : 'Era de ' + esc(userOf(q.author).name) + '.'}</div><button class="btn block" data-act="nextQ">Siguiente</button>` : ''}`;
   }
-  const f = revealed ? 'none' : ['grayscale(1) blur(16px)','grayscale(.6) blur(10px)','blur(5px)'][Q.stage-1];
-  return `<div class="coverbox" style="overflow:hidden;border-radius:8px"><div class="poster" style="background-image:url(${posterURL(q.movie)});filter:${f};transform:scale(1.12)"></div></div>
+  const f = revealed ? 'none' : ['grayscale(1) blur(5px)','grayscale(.5) blur(3px)','blur(1.5px)'][Q.stage-1];
+  return `<div class="coverbox" style="overflow:hidden;border-radius:8px"><div class="poster" style="background-image:url(${posterURL(q.movie)});filter:${f};transform:scale(1.04)"></div></div>
     <div class="hint">🎭 Género: <b>${m.genres.join(' / ')}</b></div>
     ${Q.stage>=2 || revealed ? `<div class="hint">🎨 Colores: ${esc(m.palette)}</div>` : ''}
     ${Q.stage>=3 || revealed ? `<div class="hint">🖼️ La portada se va coloreando…</div>` : ''}
@@ -844,6 +941,8 @@ async function doAuth(){
 async function startSession(){
   S.unsubs.forEach(f => { try { f(); } catch(_){} }); S.unsubs = [];
   S.unsubs.push(DB.onMovies(list => { let n = 0; list.forEach(m => { if (registerMovie(m)) n++; }); if (n && S.me) softRender(); }));
+  S.threads = {}; S.prevUnread = {}; S.threadsReady = false;
+  S.unsubs.push(DB.onThreads(S.uid, onThreads, err => { if (!S.threadsWarned){ S.threadsWarned = true; toast('No se pueden leer los mensajes pendientes (' + (err.code || err.message) + '). Falta publicar las reglas nuevas de Firestore.'); } }));
   let first = true;
   await new Promise((res, rej) => { S.unsubs.push(DB.onUsers(list => {
     S.real = Object.fromEntries(list.map(u => [u.uid, u]));
@@ -864,8 +963,20 @@ function teardown(){
   S.unsubs.forEach(f => { try { f(); } catch(_){} }); S.unsubs = [];
 }
 function resetState(){
-  S.uid = null; S.resume = null; S.me = null; S.real = {}; S.room = null; S.chat.with = null; S.freshSignup = false; S.gridQ = '';
+  S.threads = {}; S.prevUnread = {}; S.threadsReady = false; S.uid = null; S.resume = null; S.me = null; S.real = {}; S.room = null; S.chat.with = null; S.freshSignup = false; S.gridQ = '';
   S.match = {stage:'pick', sel:[], genres:{}, recs:[], group:[]};
+}
+function onThreads(list){
+  S.threads = Object.fromEntries(list.map(t => [t.id, t]));
+  const open = S.view === 'app' && S.tab === 'chat' && S.chat.with ? chatId(S.uid, S.chat.with) : null;
+  if (open && unreadOf(S.threads[open]) > 0) DB.markRead(open, S.uid).catch(() => {});   // estoy leyendo ese chat
+  let fresh = null;
+  list.forEach(t => { const n = t.id === open ? 0 : unreadOf(t); if (S.threadsReady && n > (S.prevUnread[t.id] || 0)) fresh = t; S.prevUnread[t.id] = n; });
+  const first = !S.threadsReady; S.threadsReady = true;
+  updateBadge();
+  if (S.view === 'app' && !(S.tab === 'chat' && S.chat.with)) softRender();
+  if (first && unreadTotal() > 0) toast('💬 Tenés ' + unreadTotal() + ' ' + (unreadTotal() === 1 ? 'mensaje pendiente' : 'mensajes pendientes'));
+  else if (fresh) toast('💬 Mensaje nuevo de @' + (userOf(otherOf(fresh)).username || userOf(otherOf(fresh)).name));
 }
 async function logout(){ teardown(); await DB.signOut(); resetState(); S.view = 'landing'; render(); }
 /* Volver desde el ranking inicial: si la cuenta es recién creada, se cancela el registro */
@@ -950,6 +1061,7 @@ async function openChat(uid){
   const C = S.chat;
   if (C.unsub) C.unsub();
   C.with = uid; C.msgs = []; S.tab = 'chat'; S.view = 'app';
+  DB.markRead(chatId(S.uid, uid), S.uid).catch(() => {});
   if (!myFriends().includes(uid) && !(S.me.contacts||[]).includes(uid)) await saveMe({contacts:[...(S.me.contacts||[]), uid]});
   render();
   C.unsub = DB.onMsgs(chatId(S.uid, uid), msgs => {
@@ -963,12 +1075,50 @@ async function sendMsg(){
   const other = S.chat.with, cid = chatId(S.uid, other);
   try { await DB.sendMsg(cid, {from:S.uid, text, ts:Date.now()}); }
   catch(e){ toast('No se pudo enviar: ' + (e.code || e.message)); const i2 = $('#msgin'); if (i2) i2.value = text; return; }
+  DB.touchThread(cid, S.uid, other, text).catch(e => console.warn('thread', e));
   const o = userOf(other);
   if (o.demo){
     const replies = ['¡Dale! Me parece buenísimo 🎬','Jaja yo también la vi, qué grande.','Anotada. ¿La vemos juntos esta semana?','Uh, no la vi todavía, pasame más.','Tenés buen gusto, la verdad.'];
-    setTimeout(() => DB.sendMsg(cid, {from:other, text:replies[Math.floor(Math.random()*replies.length)], ts:Date.now()}), 1200);
+    setTimeout(async () => { const t = replies[Math.floor(Math.random()*replies.length)]; await DB.sendMsg(cid, {from:other, text:t, ts:Date.now()}); DB.touchThread(cid, other, S.uid, t); }, 1200);
   }
 }
+
+const readText = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(r.error); r.readAsText(f); });
+const loadJSZip = () => window.JSZip ? Promise.resolve(window.JSZip) : new Promise((res, rej) => {
+  const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+  s.onload = () => res(window.JSZip); s.onerror = () => rej(new Error('No pude cargar el lector de .zip. Subí directamente el ratings.csv.')); document.head.appendChild(s);
+});
+async function importLetterboxd(file){
+  if (!file) return;
+  S.importMsg = 'Importando…'; render();
+  try {
+    let text;
+    if (/\.zip$/i.test(file.name)){
+      const z = await (await loadJSZip()).loadAsync(file);
+      const f = Object.values(z.files).find(x => /(^|\/)ratings\.csv$/i.test(x.name));
+      if (!f) throw new Error('El .zip no tiene un ratings.csv adentro.');
+      text = await f.async('string');
+    } else text = await readText(file);
+    const items = lbItems(parseCSV(text));
+    if (!items.length) throw new Error('No encontré calificaciones en ese archivo.');
+    const {matched, unmatched} = lbMatch(items);
+    let resolved = 0;
+    if (TMDB_TOKEN){   // las que no están en el catálogo: se buscan en TMDB (las 40 mejor puntuadas)
+      const top = unmatched.sort((p, q) => q.rating - p.rating).slice(0, 40);
+      for (let i = 0; i < top.length; i += 5) await Promise.all(top.slice(i, i + 5).map(async it => {
+        try { const m = await tmdbFind(it.name, it.year); if (m){ registerMovie(m); DB.setMovie(m.id, m).catch(() => {}); matched.push({id:m.id, stars:lbStars(it.rating), ts:it.ts}); resolved++; } } catch(_){}
+      }));
+    }
+    const ratings = Object.assign({}, S.me.ratings), ratedAt = Object.assign({}, S.me.ratedAt);
+    let added = 0;
+    matched.forEach(m => { if (!(ratings[m.id] > 0)){ ratings[m.id] = m.stars; ratedAt[m.id] = m.ts || Date.now(); added++; } });
+    await saveMe({ratings, ratedAt});
+    const skipped = items.length - matched.length;
+    S.importMsg = `¡Listo! Importamos ${added} películas de tu Letterboxd.` + (skipped > 0 ? ` ${skipped} ${skipped === 1 ? 'no está' : 'no están'} en el catálogo de GPD 2${TMDB_TOKEN ? '' : ' (sin búsqueda en TMDB no podemos sumarlas)'}.` : '') + (rated(S.me).length < 5 ? ` Todavía te faltan ${5 - rated(S.me).length} para continuar: rankeá algunas a mano.` : '');
+  } catch(e){ S.importMsg = 'No se pudo importar: ' + (e && e.message || e); }
+  render();
+}
+document.addEventListener('change', e => { if (e.target && e.target.id === 'lbfile') importLetterboxd(e.target.files[0]); });
 
 async function tmdbGo(){
   const R = S.search; R.q = ($('#tq')||{}).value || R.q; R.busy = true; R.err = ''; render();
