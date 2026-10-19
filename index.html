@@ -177,6 +177,11 @@ body{display:block;padding:0;background:var(--dark);min-height:100dvh}
 .okbadge{color:var(--green);font:700 12px Inter;white-space:nowrap}
 .tutov{z-index:90;background:rgba(0,0,0,.78)}.sheet.tut{text-align:center;padding:26px 22px}.tut-ic{font-size:44px;margin-bottom:6px}
 .dots{display:flex;gap:6px;justify-content:center;margin-top:14px}.dots i{width:7px;height:7px;border-radius:50%;background:#3a444d}.dots i.on{background:var(--green)}
+
+.top4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}.top4 .cap{font-size:10.5px;text-align:center;margin-top:4px}
+.poster.empty{display:flex;align-items:center;justify-content:center;background:var(--panel2);border:1.5px dashed var(--line);font-size:26px;color:var(--mid)}
+.poster.dim{opacity:.4}
+.frame.desktop .top4{max-width:460px}
 </style></head>
 <body>
 <div class="stage"><div class="frame mobile" id="frame"><div style="color:#9ab;font:14px Inter,sans-serif;padding:40px;text-align:center">Cargando…</div></div></div>
@@ -882,6 +887,37 @@ function searchBox(){
     ${R.res.length ? `<div class="grid" style="margin-bottom:10px">${R.res.map(m => `<div><div class="poster" data-act="rateRemote" data-id="${m.id}" style="background-image:url(${m.poster})"></div><div class="cap">${esc(m.title)} ${m.year||''}</div></div>`).join('')}</div>` : ''}
     <div class="muted" style="margin-bottom:10px;font-size:11px">Datos de películas: TMDB. Este producto usa la API de TMDB pero no está avalado ni certificado por TMDB.</div>`;
 }
+const PROF_STEP = 12;
+function topSlots(u, mine){
+  const top = (u.top4 || []).filter(id => MOVIE[id]);
+  return `<div class="top4">${[0,1,2,3].map(i => { const id = top[i];
+    if (id) return `<div class="tslot"><div class="poster" ${mine?`data-act="pickSlot" data-id="${i}"`:''} style="background-image:url(${posterURL(id)})"><div class="stars">${stars((u.ratings||{})[id]||0)}</div></div><div class="cap">${esc(MOVIE[id].title)}</div></div>`;
+    return mine ? `<div class="tslot"><div class="poster empty" data-act="pickSlot" data-id="${i}">＋</div><div class="cap muted">Elegir</div></div>` : `<div class="tslot"><div class="poster empty"></div></div>`; }).join('')}</div>`;
+}
+function profileView(uid){
+  const mine = uid === S.uid, u = mine ? S.me : userOf(uid);
+  if (!u || (!mine && !isMutual(S.me, u))) return `<button class="back" data-act="profBack">← Volver</button><div class="card muted">Solo podés ver el perfil de tus amigos confirmados.</div>`;
+  const list = rated(u).map(id => MOVIE[id]).filter(Boolean).sort((x,y) => (u.ratings[y.id]-u.ratings[x.id]) || x.title.localeCompare(y.title));
+  const n = Math.min(S.profN || PROF_STEP, list.length), s = mine ? null : similarity(S.me, u);
+  return `<button class="back" data-act="profBack">← Volver</button>
+    <div class="row" style="margin:6px 0 14px">${av(u,'lg')}<div class="grow"><h1 style="margin:0">${esc(u.name)}</h1><div class="muted">@${esc(u.username||u.name)} · ${list.length} películas rankeadas${s?` · ${Math.round(s.sim*100)}% afinidad`:''}</div></div>
+      ${mine ? '' : `<button class="btn sm" data-act="openChat" data-id="${u.uid}">💬 Chat</button>`}</div>
+    <div class="sec">Top 4 favoritas ${mine ? '<span style="text-transform:none;letter-spacing:0">(tocá para elegir o cambiar)</span>' : ''}</div>
+    ${topSlots(u, mine)}
+    ${!mine && !(u.top4||[]).length ? `<div class="muted" style="margin:-4px 0 10px">Todavía no eligió su top 4.</div>` : ''}
+    <div class="sec">${mine ? 'Tus películas' : 'Películas que rankeó'} (${list.length})</div>
+    ${list.length ? `<div class="grid">${list.slice(0,n).map(m => `<div><div class="poster" style="background-image:url(${posterURL(m.id)});cursor:default"><div class="stars">${stars(u.ratings[m.id])}</div></div><div class="cap">${esc(m.title)}</div></div>`).join('')}</div>
+      ${n < list.length ? `<div style="text-align:center;margin:14px 0"><button class="btn ghost" data-act="profMore">Ver más (${list.length-n})</button></div>` : ''}` : '<div class="card muted">Todavía no rankeó películas.</div>'}`;
+}
+function pickView(){
+  const me = S.me, q = norm(S.pickQ || '').trim(), cur = me.top4 || [];
+  const list = rated(me).map(id => MOVIE[id]).filter(Boolean).filter(m => !q || norm(m.title).includes(q)).sort((x,y) => (me.ratings[y.id]-me.ratings[x.id]) || x.title.localeCompare(y.title));
+  return `<div class="overlay" data-act="closePick"><div class="sheet" data-stop="1" style="max-height:80%;overflow:auto"><h2>Elegí tu favorita #${S.pick+1}</h2>
+    <p class="sub" style="margin:4px 0 10px">Salen de las películas que ya rankeaste.</p>
+    <input class="inp" id="pq" type="search" placeholder="🔍 Buscar entre tus películas" value="${esc(S.pickQ||'')}" style="margin-bottom:10px">
+    ${list.length ? `<div class="grid">${list.map(m => `<div><div class="poster ${cur.includes(m.id)?'dim':''}" data-act="setTop" data-id="${m.id}" style="background-image:url(${posterURL(m.id)})"><div class="stars">${stars(me.ratings[m.id])}</div></div><div class="cap">${esc(m.title)}</div></div>`).join('')}</div>` : '<div class="muted">No hay resultados.</div>'}
+    ${cur[S.pick] ? `<div style="margin-top:12px"><button class="btn ghost block" data-act="clearTop">Quitar de mi top 4</button></div>` : ''}</div></div>`;
+}
 function cell(m){
   const r = (S.me.ratings||{})[m.id];
   return `<div><div class="poster" data-act="rate" data-id="${m.id}" style="background-image:url(${posterURL(m.id)})">${r?`<div class="stars">${stars(r)}</div>`:''}</div><div class="cap">${esc(m.title)}</div></div>`;
@@ -890,13 +926,14 @@ function cell(m){
 function appView(){
   const tabs = [['home','🎬','Inicio'],['friends','👥','Amigos'],['match','✨','Match'],['twin','💞','Alma gemela'],['chat','💬','Chats']];
   let body = '';
-  if (S.tab === 'home') body = homeTab();
-  if (S.tab === 'friends') body = friendsTab();
-  if (S.tab === 'match') body = matchTab();
-  if (S.tab === 'twin') body = twinTab();
-  if (S.tab === 'chat') body = chatTab();
-  return `<div class="head">${logo()}<div class="chip">${esc(S.me.name)} ${av(S.me,'sm')}<button class="btn sm ghost" data-act="logout">Salir</button></div></div>
-    <div class="main">${body}</div>
+  if (S.prof) body = profileView(S.prof);
+  else if (S.tab === 'home') body = homeTab();
+  else if (S.tab === 'friends') body = friendsTab();
+  else if (S.tab === 'match') body = matchTab();
+  else if (S.tab === 'twin') body = twinTab();
+  else if (S.tab === 'chat') body = chatTab();
+  return `<div class="head">${logo()}<div class="chip" data-act="profile" data-id="${S.uid}" style="cursor:pointer">${esc(S.me.name)} ${av(S.me,'sm')}<button class="btn sm ghost" data-act="logout">Salir</button></div></div>
+    <div class="main">${body}</div>${S.pick != null ? pickView() : ''}
     <div class="tabbar">${tabs.map(t => `<button data-act="tab" data-id="${t[0]}" class="${S.tab===t[0]?'on':''}"><span>${t[1]}${t[0]==='chat' && unreadTotal() ? `<i class="nbadge">${unreadTotal()}</i>` : ''}</span>${t[2]}</button>`).join('')}</div>`;
 }
 
@@ -932,7 +969,8 @@ function friendsTab(){
       : sent.includes(u) ? `<span class="okbadge">✓ Enviada</span>`
       : `<button class="btn sm" data-act="follow" data-id="${u.uid}">Agregar</button>`;
     if (kind !== 'sent' && kind !== 'inc' && kind !== 'friend' && sent.includes(u)) kind = 'sent2';
-    return `<div class="person">${av(u)}<div class="grow"><b>@${esc(u.username||u.name)}</b><div class="muted">${kind==='sent'||kind==='sent2'?'Solicitud enviada':kind==='inc'?'Quiere ser tu amigo':rated(u).length+' películas'}${s?` · ${Math.round(s.sim*100)}% afinidad`:''}</div></div>${btn}</div>`;
+    const go = kind === 'friend' ? ` data-act="profile" data-id="${u.uid}" style="cursor:pointer"` : '';
+    return `<div class="person"><span${go}>${av(u)}</span><div class="grow"${go}><b>@${esc(u.username||u.name)}</b><div class="muted">${kind==='sent'||kind==='sent2'?'Solicitud enviada':kind==='inc'?'Quiere ser tu amigo':rated(u).length+' películas'}${s?` · ${Math.round(s.sim*100)}% afinidad`:''}${kind==='friend'?' · <span style="color:var(--green)">Ver perfil</span>':''}</div></div>${btn}</div>`;
   };
   const list = (arr, kind, empty) => arr.length ? arr.map(u => row(u,kind)).join('') : `<div class="muted">${empty}</div>`;
   const notice = S.notice ? `<div class="notice">✅ ${esc(S.notice)}</div>` : '';
@@ -1129,7 +1167,7 @@ function teardown(){
   S.unsubs.forEach(f => { try { f(); } catch(_){} }); S.unsubs = [];
 }
 function resetState(){
-  S.threads = {}; S.prevUnread = {}; S.threadsReady = false; S.uid = null; S.resume = null; S.me = null; S.real = {}; S.room = null; S.chat.with = null; S.freshSignup = false; S.gridQ = ''; S.tut = null; S.notice = '';
+  S.threads = {}; S.prevUnread = {}; S.threadsReady = false; S.uid = null; S.resume = null; S.me = null; S.real = {}; S.room = null; S.chat.with = null; S.freshSignup = false; S.gridQ = ''; S.tut = null; S.notice = ''; S.prof = null; S.pick = null;
   S.match = {stage:'pick', sel:[], genres:{}, recs:[], group:[]};
 }
 function onThreads(list){
@@ -1324,7 +1362,14 @@ document.addEventListener('click', async e => {
     case 'tutOpen': tutGo(0); break;
     case 'gfilter': S.gridG = id || ''; S.gridP = 1; render(); break;
     case 'gpage': S.gridP = +id; render(); { const g = $('#gq'); if (g) g.scrollIntoView({block:'start'}); } break;
-    case 'tab': if (id !== 'friends') S.notice = ''; if (S.chat.unsub){ S.chat.unsub(); S.chat.unsub = null; } S.chat.with = null; S.tab = id; render(); break;
+    case 'profile': S.prof = id; S.profN = PROF_STEP; render(); { const m = $('.main'); if (m) m.scrollTop = 0; } break;
+    case 'profBack': S.prof = null; render(); break;
+    case 'profMore': S.profN = (S.profN || PROF_STEP) + PROF_STEP; render(); break;
+    case 'pickSlot': S.pick = +id; S.pickQ = ''; render(); break;
+    case 'closePick': if (e.target === t) { S.pick = null; render(); } break;
+    case 'setTop': { const top = [...(S.me.top4||[])].filter(x => x !== id); top[S.pick] = id; await saveMe({top4: top.filter(Boolean).slice(0,4)}); S.pick = null; render(); toast('Top 4 actualizado'); break; }
+    case 'clearTop': { const top = [...(S.me.top4||[])]; top.splice(S.pick,1); await saveMe({top4: top}); S.pick = null; render(); break; }
+    case 'tab': S.prof = null; if (id !== 'friends') S.notice = ''; if (S.chat.unsub){ S.chat.unsub(); S.chat.unsub = null; } S.chat.with = null; S.tab = id; render(); break;
     case 'follow': {
       const wasInc = incomingRequests(S.me, allOthers()).some(u => u.uid === id), nm = '@' + (userOf(id).username || userOf(id).name);
       await saveMe({friends:[...new Set([...(S.me.friends||[]), id])]});
@@ -1353,7 +1398,7 @@ document.addEventListener('click', async e => {
       S.q = {stage:1, picked:null, pts:0};
       await DB.updateRoom(r.id, {['scores.'+S.uid]: ((r.scores||{})[S.uid]||0) + pts, ['progress.'+S.uid]: i+1});
       break; }
-    case 'openChat': openChat(id); break;
+    case 'openChat': S.prof = null; openChat(id); break;
     case 'tmdbGo': tmdbGo(); break;
     case 'rateRemote': { const m = S.search.res.find(x => x.id === id); registerMovie(m); DB.setMovie(id, m); S.sheet = {id, stars:(S.me.ratings||{})[id]||0, text:(S.me.reviews||{})[id]||''}; render(); break; }
     case 'chatBack': if (S.chat.unsub) S.chat.unsub(); S.chat.unsub = null; S.chat.with = null; render(); break;
@@ -1361,7 +1406,8 @@ document.addEventListener('click', async e => {
   }
 });
 document.addEventListener('keydown', e => { if (e.key !== 'Enter') return; const id = e.target.id; if (id === 'msgin') sendMsg(); else if (id === 'tq') tmdbGo(); else if (id === 'au' || id === 'ap') doAuth(); });
-document.addEventListener('input', e => { const id = e.target.id; if (id === 'fq' || id === 'gq'){ if (id === 'fq') S.friendQ = e.target.value; else { S.gridQ = e.target.value; S.gridP = 1; } render(); const i = $('#' + id); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } } });
+document.addEventListener('input', e => { const id = e.target.id; if (id === 'pq'){ S.pickQ = e.target.value; render(); const i = $('#pq'); if (i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } return; }
+  if (id === 'fq' || id === 'gq'){ if (id === 'fq') S.friendQ = e.target.value; else { S.gridQ = e.target.value; S.gridP = 1; } render(); const i = $('#' + id); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } } });
 window.addEventListener('resize', () => { const d = window.innerWidth >= 900 ? 'desktop' : 'mobile'; if (d !== S.device) softRender(); });
 
 /* ---------- Arranque ---------- */
