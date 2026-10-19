@@ -172,6 +172,11 @@ body{display:block;padding:0;background:var(--dark);min-height:100dvh}
 .pager{display:flex;justify-content:center;align-items:center;gap:6px;margin:14px 0 6px;flex-wrap:wrap}
 .pg{min-width:36px;height:36px;padding:0 10px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);color:var(--mid);font:600 13px Inter;cursor:pointer}
 .pg.on{background:var(--green);border-color:var(--green);color:#14181c}.pg:disabled{opacity:.35;cursor:default}.pgap{color:var(--mid)}
+
+.notice{background:#10301f;border:1px solid var(--green);color:#d7ffe6;border-radius:10px;padding:11px 14px;margin:6px 0 12px;font:600 13px Inter}
+.okbadge{color:var(--green);font:700 12px Inter;white-space:nowrap}
+.tutov{z-index:90;background:rgba(0,0,0,.78)}.sheet.tut{text-align:center;padding:26px 22px}.tut-ic{font-size:44px;margin-bottom:6px}
+.dots{display:flex;gap:6px;justify-content:center;margin-top:14px}.dots i{width:7px;height:7px;border-radius:50%;background:#3a444d}.dots i.on{background:var(--green)}
 </style></head>
 <body>
 <div class="stage"><div class="frame mobile" id="frame"><div style="color:#9ab;font:14px Inter,sans-serif;padding:40px;text-align:center">Cargando…</div></div></div>
@@ -765,12 +770,29 @@ function render(){
   else if (S.view === 'room') html = roomShell();
   else html = appView();
   if (S.sheet) html += sheetView();
+  if (S.tut != null) html += tutView();
   if (S.toast) html += `<div class="toast">${esc(S.toast)}</div>`;
   const keep = f.querySelector('.main, .land'); const top = keep ? keep.scrollTop : 0;
   f.innerHTML = html;
   const m = f.querySelector('.main'); if (m) m.scrollTop = top;
   const mg = f.querySelector('.msgs'); if (mg) mg.scrollTop = mg.scrollHeight;
 }
+const TUT = [
+  {tab:'home', ic:'🎬', t:'¡Bienvenido a GPD 2!', d:'Es una app para descubrir películas con tus amigos. En un minuto te mostramos cómo funciona.'},
+  {tab:'home', ic:'⭐', t:'Rankeá películas', d:'Tocá una portada para ponerle de 0.5 a 5 estrellas y, si querés, una reseña corta. Cuantas más rankees, mejores serán tus recomendaciones. Podés buscar, filtrar por categoría y pasar de página.'},
+  {tab:'friends', ic:'👥', t:'Agregá amigos', d:'Buscalos por su @usuario y mandales una solicitud. La amistad se confirma cuando los dos se agregan; verás el aviso "Solicitud enviada" y la persona aparece en "Solicitudes enviadas".'},
+  {tab:'match', ic:'✨', t:'Match con amigos', d:'Elegí con quiénes querés mirar algo y te decimos qué película le puede gustar a todo el grupo, con un porcentaje. También hay trivias para jugar juntos.'},
+  {tab:'twin', ic:'💞', t:'Alma gemela', d:'Buscamos a la persona que rankea más parecido a vos. Si no aparece nadie, puede que no hayas rankeado suficientes películas o que todavía no haya alguien con alta compatibilidad.'},
+  {tab:'chat', ic:'💬', t:'Chats', d:'Chateá con tus amigos y con tu alma gemela. Un globito te avisa cuando tenés mensajes pendientes y de quién vienen.'},
+];
+function tutView(){
+  const i = S.tut, s = TUT[i], last = i === TUT.length - 1;
+  return `<div class="overlay tutov"><div class="sheet tut"><div class="tut-ic">${s.ic}</div><h2>${s.t}</h2><p class="sub">${s.d}</p>
+    <div class="dots">${TUT.map((_, k) => `<i class="${k===i?'on':''}"></i>`).join('')}</div>
+    <div class="row" style="margin-top:14px">${last ? '' : '<button class="btn ghost" data-act="tutSkip">Saltar</button>'}<button class="btn grow" data-act="tutNext">${last ? '¡Empezar!' : 'Siguiente'}</button></div></div></div>`;
+}
+function tutGo(i){ S.tut = i; if (i != null && TUT[i]) S.tab = TUT[i].tab; render(); }
+function tutEnd(){ S.tut = null; S.tab = 'home'; saveMe({tutorialDone:true}).catch(() => {}); render(); }
 function softRender(){
   const a = document.activeElement;
   if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return;
@@ -892,7 +914,7 @@ function homeTab(){
     ${feed.length ? `<div class="feed">${feed.map(a => `<div class="fitem">${poster(a.movie.id)}<div class="cap"><b style="color:#fff">${esc(a.user.name)}</b> · <span style="color:var(--green)">${stars(a.stars)}</span><br>${esc(a.movie.title)}${a.ts ? `<br><span style="color:var(--low)">hace ${ago(a.ts)}</span>` : ''}</div></div>`).join('')}</div>`
       : `<div class="card muted">Todavía no hay novedades. <button class="lnk" data-act="tab" data-id="friends">Buscá a tus amigos por nombre de usuario</button>.</div>`}
     ${pop.length ? `<div class="sec">Populares entre vos y tus amigos</div><div class="feed">${pop.map(p => `<div class="fitem">${poster(p.movie.id)}<div class="cap"><b style="color:#fff">${esc(p.movie.title)}</b><br><span style="color:var(--green)">${p.avg.toFixed(1)} ★</span> · ${p.n} ${p.n===1?'persona':'personas'}</div></div>`).join('')}</div>` : ''}
-    <div class="sec">Tus películas</div>
+    <div class="sec">Tus películas <button class="lnk" data-act="tutOpen" style="float:right;text-transform:none;letter-spacing:0">¿Cómo funciona? Ver tutorial</button></div>
     ${importBox()}${searchBox()}${filterBox()}${genreBar()}<div class="grid">${myGrid()}</div>${pager()}`;
 }
 
@@ -900,18 +922,21 @@ function friendsTab(){
   const all = allOthers().filter(u => u.username);
   const fr = myFriends().map(userOf), inc = incomingRequests(S.me, all), sent = sentRequests(S.me, all);
   const q = (S.friendQ||'').trim().toLowerCase().replace(/^@/,'');
-  const found = q ? all.filter(u => u.username.includes(q) && !isMutual(S.me,u) && !inc.includes(u) && !sent.includes(u))
+  const found = q ? all.filter(u => u.username.includes(q) && !isMutual(S.me,u) && !inc.includes(u))
     .sort((a,b) => (b.username===q) - (a.username===q) || a.username.localeCompare(b.username)).slice(0,20) : [];
   const row = (u, kind) => {
     const s = similarity(S.me, u);
     const btn = kind==='friend' ? `<button class="btn sm" data-act="openChat" data-id="${u.uid}">💬 Chat</button><button class="btn sm ghost" data-act="unfollow" data-id="${u.uid}">Quitar</button>`
       : kind==='inc' ? `<button class="btn sm" data-act="follow" data-id="${u.uid}">Aceptar</button>`
       : kind==='sent' ? `<button class="btn sm ghost" data-act="unfollow" data-id="${u.uid}">Cancelar</button>`
+      : sent.includes(u) ? `<span class="okbadge">✓ Enviada</span>`
       : `<button class="btn sm" data-act="follow" data-id="${u.uid}">Agregar</button>`;
-    return `<div class="person">${av(u)}<div class="grow"><b>@${esc(u.username||u.name)}</b><div class="muted">${kind==='sent'?'Solicitud enviada':kind==='inc'?'Quiere ser tu amigo':rated(u).length+' películas'}${s?` · ${Math.round(s.sim*100)}% afinidad`:''}</div></div>${btn}</div>`;
+    if (kind !== 'sent' && kind !== 'inc' && kind !== 'friend' && sent.includes(u)) kind = 'sent2';
+    return `<div class="person">${av(u)}<div class="grow"><b>@${esc(u.username||u.name)}</b><div class="muted">${kind==='sent'||kind==='sent2'?'Solicitud enviada':kind==='inc'?'Quiere ser tu amigo':rated(u).length+' películas'}${s?` · ${Math.round(s.sim*100)}% afinidad`:''}</div></div>${btn}</div>`;
   };
   const list = (arr, kind, empty) => arr.length ? arr.map(u => row(u,kind)).join('') : `<div class="muted">${empty}</div>`;
-  return `<h1>Amigos</h1><p class="sub">Tu usuario es <b style="color:#fff">@${esc(S.me.username||S.me.name)}</b>. La amistad se confirma cuando los dos se agregan. Sin límite de amigos.</p>
+  const notice = S.notice ? `<div class="notice">✅ ${esc(S.notice)}</div>` : '';
+  return `<h1>Amigos</h1>${notice}<p class="sub">Tu usuario es <b style="color:#fff">@${esc(S.me.username||S.me.name)}</b>. La amistad se confirma cuando los dos se agregan. Sin límite de amigos.</p>
     <div class="cols"><div>
       ${inc.length ? `<div class="sec">Solicitudes recibidas (${inc.length})</div><div class="people">${list(inc,'inc','')}</div>` : ''}
       <div class="sec">Tus amigos (${fr.length})</div><div class="people">${list(fr,'friend','Todavía no tenés amigos confirmados. Buscalos por nombre de usuario.')}</div>
@@ -968,6 +993,7 @@ function twinTab(){
       <p class="sub">Buscamos a la persona que <b style="color:#fff">no es tu amiga</b> y rankea más parecido a vos. Necesitan haber rankeado <b style="color:#fff">al menos 2 películas en común</b>.</p>
       <div class="card"><h3>Todavía no hay una alma gemela</h3>
         <p class="sub" style="margin-bottom:6px">Personas en GPD 2: <b style="color:#fff">${others.length}</b> · ya son tus amigas: <b style="color:#fff">${fr.length}</b> · películas que rankeaste: <b style="color:#fff">${rated(S.me).length}</b></p>
+        <p class="sub" style="margin:0 0 8px"><b style="color:#fff">¿Por qué no aparece nadie?</b> Puede ser que todavía no hayas rankeado la cantidad suficiente de películas, o que no se haya encontrado a alguien con un porcentaje alto de compatibilidad.</p>
         <p class="sub" style="margin:0">Probá rankear más películas (cuantas más, más chances de coincidir) o invitá a más gente a la app.</p>
         <div style="margin-top:12px"><button class="btn" data-act="tab" data-id="home">Rankear más películas</button></div></div>
       ${byFriends.length ? `<div class="sec">Afinidad con tus amigos</div><div class="people">${byFriends.map(t => `<div class="person">${av(t.user)}<div class="grow"><b>${esc(t.user.name)}</b><div class="muted">${t.s.common.length} en común</div></div><div class="pct" style="font-size:16px">${Math.round(t.s.sim*100)}%</div><button class="btn sm ghost" data-act="openChat" data-id="${t.user.uid}">💬</button></div>`).join('')}</div>` : ''}`;
@@ -1103,7 +1129,7 @@ function teardown(){
   S.unsubs.forEach(f => { try { f(); } catch(_){} }); S.unsubs = [];
 }
 function resetState(){
-  S.threads = {}; S.prevUnread = {}; S.threadsReady = false; S.uid = null; S.resume = null; S.me = null; S.real = {}; S.room = null; S.chat.with = null; S.freshSignup = false; S.gridQ = '';
+  S.threads = {}; S.prevUnread = {}; S.threadsReady = false; S.uid = null; S.resume = null; S.me = null; S.real = {}; S.room = null; S.chat.with = null; S.freshSignup = false; S.gridQ = ''; S.tut = null; S.notice = '';
   S.match = {stage:'pick', sel:[], genres:{}, recs:[], group:[]};
 }
 function onThreads(list){
@@ -1292,11 +1318,19 @@ document.addEventListener('click', async e => {
       const ratings = Object.assign({}, S.me.ratings), reviews = Object.assign({}, S.me.reviews);
       delete ratings[S.sheet.id]; delete reviews[S.sheet.id];
       S.sheet = null; await saveMe({ratings, reviews}); render(); break; }
-    case 'finishOnboard': S.freshSignup = false; afterLogin(); break;
+    case 'finishOnboard': { const first = S.freshSignup && !S.me.tutorialDone; S.freshSignup = false; afterLogin(); if (first) tutGo(0); break; }
+    case 'tutNext': if (S.tut >= TUT.length - 1) tutEnd(); else tutGo(S.tut + 1); break;
+    case 'tutSkip': tutEnd(); break;
+    case 'tutOpen': tutGo(0); break;
     case 'gfilter': S.gridG = id || ''; S.gridP = 1; render(); break;
     case 'gpage': S.gridP = +id; render(); { const g = $('#gq'); if (g) g.scrollIntoView({block:'start'}); } break;
-    case 'tab': if (S.chat.unsub){ S.chat.unsub(); S.chat.unsub = null; } S.chat.with = null; S.tab = id; render(); break;
-    case 'follow': await saveMe({friends:[...new Set([...(S.me.friends||[]), id])]}); render(); toast(isMutual(S.me, userOf(id)) ? '¡Ahora son amigos!' : 'Solicitud enviada'); break;
+    case 'tab': if (id !== 'friends') S.notice = ''; if (S.chat.unsub){ S.chat.unsub(); S.chat.unsub = null; } S.chat.with = null; S.tab = id; render(); break;
+    case 'follow': {
+      const wasInc = incomingRequests(S.me, allOthers()).some(u => u.uid === id), nm = '@' + (userOf(id).username || userOf(id).name);
+      await saveMe({friends:[...new Set([...(S.me.friends||[]), id])]});
+      S.notice = isMutual(S.me, userOf(id)) || wasInc ? `¡Ahora vos y ${nm} son amigos! Ya pueden chatear.` : `Solicitud enviada a ${nm}. Cuando la acepte, van a ser amigos.`;
+      clearTimeout(S.noticeT); S.noticeT = setTimeout(() => { S.notice = ''; if (S.view === 'app' && S.tab === 'friends') softRender(); }, 8000);
+      render(); toast(wasInc ? '¡Ahora son amigos!' : '✅ Solicitud enviada'); break; }
     case 'unfollow': await saveMe({friends:(S.me.friends||[]).filter(x => x !== id)}); S.match.sel = S.match.sel.filter(x => x !== id); render(); break;
     case 'toggleSel': { const s = S.match.sel; const k = s.indexOf(id); if (k >= 0) s.splice(k,1); else s.push(id); render(); break; }
     case 'genre': { const g = S.match.genres, cur = g[id]; if (!cur) g[id] = 'like'; else if (cur === 'like') g[id] = 'no'; else delete g[id]; render(); break; }
