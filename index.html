@@ -194,6 +194,10 @@ body{display:block;padding:0;background:var(--dark);min-height:100dvh}
 @keyframes pulse{50%{box-shadow:0 0 0 6px rgba(255,128,0,.35)}}
 .agebox{display:flex;gap:10px;align-items:flex-start;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:12.5px;line-height:1.4;color:#dfe6ec;cursor:pointer}
 .agebox input{margin-top:3px;width:18px;height:18px;flex-shrink:0;accent-color:var(--orange)}
+
+.bub.bad,.review.bad{cursor:pointer;position:relative;user-select:none}
+.bub.bad .bt,.review.bad .bt{filter:blur(6px);display:block}
+.bub.bad::after,.review.bad::after{content:'⚠️ Lenguaje inapropiado · tocá para ver';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font:700 10.5px Inter;color:#fff;text-shadow:0 0 4px #000,0 0 4px #000;border-radius:inherit;padding:0 6px}
 </style></head>
 <body>
 <div class="stage"><div class="frame mobile" id="frame"><div style="color:#9ab;font:14px Inter,sans-serif;padding:40px;text-align:center">Cargando…</div></div></div>
@@ -611,7 +615,22 @@ function lbMatch(items){
   return {matched, unmatched};
 }
 
-if (typeof module !== 'undefined') module.exports = {parseCSV, lbItems, lbMatch, lbFind, lbStars, normTitle, activityFeed, popular, validUsername, BASE_IDS, registerMovie, fromTmdb, friendCode, isMutual, incomingRequests, sentRequests, MOVIES, MOVIE, GENRES, DEMO_USERS, COLORS, predict, groupRecs, similarity, twins, twinRecs, twinBanner, genreMeans, buildReviewQuestions, buildColorQuestions, leaderboard, rated};
+if (typeof module !== 'undefined') module.exports = {isProfane, parseCSV, lbItems, lbMatch, lbFind, lbStars, normTitle, activityFeed, popular, validUsername, BASE_IDS, registerMovie, fromTmdb, friendCode, isMutual, incomingRequests, sentRequests, MOVIES, MOVIE, GENRES, DEMO_USERS, COLORS, predict, groupRecs, similarity, twins, twinRecs, twinBanner, genreMeans, buildReviewQuestions, buildColorQuestions, leaderboard, rated};
+
+/* ---------- Filtro de malas palabras (los mensajes se difuminan; se pueden mostrar con un toque) ---------- */
+const BAD_STEMS = ['boludo','pelotudo','pelotud','forro','hijo de puta','hijoputa','hdp','hijueputa','puta','puto','putita','mierda','carajo','cagar','cagada','cagón','concha','conchudo','conchuda','verga','pija','pijudo','poronga','chota','culo','culiado','culeado','orto','cojudo','coger','garcha','garchar','gilipollas','capullo','marica','maricon','mariconazo','trolo','sorete','chupapija','chupame','pajero','paja','mogolico','mogólico','retrasado','subnormal','imbecil','idiota','estupido','boluda','pelotuda','malparido','gonorrea','zorra','perra','cabron','joder','jodete','andate a la mierda','la puta madre','lpm','ctm','fuck','fucker','fucking','shit','bitch','bastard','asshole','dick','cunt','slut','whore','nigger','faggot','retard'];
+const BAD_WORDS = (() => {
+  const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const short = new Set(['hdp','lpm','ctm']);     // las siglas solo cuentan como palabra completa
+  return BAD_STEMS.map(norm).map(w => short.has(w) ? new RegExp('(^|\\s)' + w + '(\\s|$)') : new RegExp('(^|\\s)' + w.replace(/ /g,'\\s+') + '[a-z]{0,4}(\\s|$)'));
+})();
+function isProfane(text){
+  let t = String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  t = t.replace(/[@4]/g,'a').replace(/3/g,'e').replace(/[1!|]/g,'i').replace(/0/g,'o').replace(/\$/g,'s').replace(/5/g,'s').replace(/7/g,'t');   // p0ll4 -> polla, m13rd4 -> mierda
+  t = t.replace(/[^a-z\s]/g,'').replace(/(.)\1{2,}/g,'$1$1');                                 // "boluuudoooo" -> "boluudoo"
+  const dedup = t.replace(/(.)\1+/g,'$1');
+  return BAD_WORDS.some(r => r.test(' ' + t + ' ') || r.test(' ' + dedup + ' '));
+}
 
 /* ===== GPD 2 · capa de datos: Firebase (Firestore + auth anónima) o modo local ===== */
 /* Pegá acá la config de tu proyecto Firebase (Configuración del proyecto > Tus apps > Web). Si queda en null, funciona en modo local. */
@@ -1115,11 +1134,11 @@ function chatTab(){
   return `<h1>Chats</h1>
     ${total ? `<div class="banner" style="font-size:14px">💬 Tenés <b>${total}</b> ${total === 1 ? 'mensaje pendiente' : 'mensajes pendientes'} de <b>${people}</b> ${people === 1 ? 'persona' : 'personas'}.</div>` : '<p class="sub">Tus amigos y las personas con las que hablaste. No tenés mensajes pendientes.</p>'}
     <div class="people">${rows.length ? rows.map(r => { const n = unreadOf(r.t), isFriend = myFriends().includes(r.id);
-      const prev = r.t && r.t.lastText ? `${r.t.lastFrom === S.uid ? 'Vos: ' : ''}${esc(r.t.lastText)}` : (isFriend ? 'Amigo' : 'Alma gemela');
+      const prev = r.t && r.t.lastText ? `${r.t.lastFrom === S.uid ? 'Vos: ' : ''}${isProfane(r.t.lastText) ? '🙈 Mensaje oculto' : esc(r.t.lastText)}` : (isFriend ? 'Amigo' : 'Alma gemela');
       return `<div class="person ${n ? 'unread' : ''}" data-act="openChat" data-id="${r.id}">${av(r.u)}<div class="grow"><b>@${esc(r.u.username || r.u.name)}</b><div class="muted" style="${n ? 'color:#fff;font-weight:600;' : ''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${prev}</div></div>${n ? `<span class="count">${n}</span>` : ''}</div>`; }).join('')
       : '<div class="card muted">Todavía no tenés conversaciones. Agregá amigos en la pestaña Amigos (con el botón 💬 podés chatear con cada uno) o hablale a tu alma gemela.</div>'}</div>`;
 }
-const msgsHTML = () => S.chat.msgs.map(m => `<div class="bub ${m.from===S.uid?'me':''}">${esc(m.text)}</div>`).join('');
+const msgsHTML = () => S.chat.msgs.map(m => `<div class="bub ${m.from===S.uid?'me':''} ${isProfane(m.text)?'bad':''}" ${isProfane(m.text)?'data-act="reveal" title="Mensaje con lenguaje inapropiado. Tocá para verlo"':''}><span class="bt">${esc(m.text)}</span></div>`).join('');
 
 /* ---------- Hoja de rating ---------- */
 function sheetView(){
@@ -1155,7 +1174,7 @@ function questionHTML(q, r){
   const revealed = Q.picked !== null;
   if (q.type === 'review'){
     return `<div class="row">${poster(q.movie)}<div><b>${esc(m.title)}</b><div class="muted">${m.year}</div></div></div>
-      <div class="review">“${esc(q.text)}”</div>
+      <div class="review ${isProfane(q.text)?'bad':''}" ${isProfane(q.text)?'data-act="reveal"':''}><span class="bt">“${esc(q.text)}”</span></div>
       ${q.options.map(uid => { const u = userOf(uid); let c = ''; if (revealed){ c = uid === q.author ? 'ok' : (uid === Q.picked ? 'bad' : 'dim'); } return `<button class="opt ${c}" data-act="pick" data-id="${uid}" ${revealed?'disabled':''}>${av(u,'sm')}${esc(u.name)}</button>`; }).join('')}
       ${revealed ? `<div class="hint">${Q.picked===q.author ? '¡Correcto! +2 puntos' : 'Era de ' + esc(userOf(q.author).name) + '.'}</div><button class="btn block" data-act="nextQ">Siguiente</button>` : ''}`;
   }
@@ -1388,6 +1407,7 @@ document.addEventListener('click', async e => {
   const act = t.dataset.act, id = t.dataset.id;
   switch (act){
     case 'ageToggle': S.auth.age = t.checked; break;
+    case 'reveal': t.classList.remove('bad'); t.removeAttribute('data-act'); break;
     case 'color': { const u = $('#au').value, p = $('#ap').value; S.draft.color = id; render(); $('#au').value = u; $('#ap').value = p; break; }
     case 'goAuth': S.auth = {mode:id, err:'', busy:false, u:(S.auth&&S.auth.u)||''}; S.view = 'auth'; render(); break;
     case 'goLanding': S.view = 'landing'; render(); break;
