@@ -809,7 +809,8 @@ async function tmdbSearch(q){
     const rest = await Promise.all(Array.from({length: pages - 1}, (_, i) => tmdbGet('search/movie?include_adult=false&language=es-AR&page=' + (i + 2) + '&query=' + enc).catch(() => ({results:[]}))));
     rest.forEach(r => out.push(...(r.results || [])));
   }
-  return out.filter(x => x.poster_path).map(fromTmdb);
+  // solo películas de cine: sin documentales, películas de TV, estrenos sin fecha ni títulos sin votos (suelen ser cortos o extras)
+  return out.filter(x => x.poster_path && x.release_date && (x.vote_count || 0) >= 2 && !(x.genre_ids || []).some(g => g === 99 || g === 10770)).map(fromTmdb);
 }
 
 async function tmdbFind(title, year){
@@ -950,12 +951,12 @@ function onboardView(){
       <button class="btn block" data-act="finishOnboard" ${n<5?'disabled':''}>${n<5 ? `Faltan ${5-n} películas` : 'Continuar'}</button></div></div>`;
 }
 const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-const filterBox = () => `<input class="inp" id="gq" type="search" placeholder="🔍 Buscar cualquier película (título, año o género)" value="${esc(S.gridQ||'')}" style="margin:6px 0 12px">`;
+const filterBox = () => `<input class="inp" id="gq" type="search" placeholder="🔍 Buscar película por título" value="${esc(S.gridQ||'')}" style="margin:6px 0 12px">`;
 const MIN_AGE = 13;   // edad mínima para registrarse (ajustable)
 const PAGE_SIZE = 24;
 const gridList = () => {
   const q = norm(S.gridQ||'').trim();
-  return [...MOVIES].sort((x,y) => norm(x.title).replace(/[^a-z0-9]/g,'').localeCompare(norm(y.title).replace(/[^a-z0-9]/g,''))).filter(m => BASE_IDS.includes(m.id) || (S.me.ratings||{})[m.id] > 0).filter(m => !q || norm(m.title).includes(q) || String(m.year).includes(q) || m.genres.some(g => norm(g).includes(q))).filter(m => !S.gridG || m.genres.includes(S.gridG));
+  return [...MOVIES].sort((x,y) => norm(x.title).replace(/[^a-z0-9]/g,'').localeCompare(norm(y.title).replace(/[^a-z0-9]/g,''))).filter(m => BASE_IDS.includes(m.id) || (S.me.ratings||{})[m.id] > 0).filter(m => !q || norm(m.title).includes(q)).filter(m => !S.gridG || m.genres.includes(S.gridG));
 };
 const remoteCell = m => `<div><div class="poster" data-act="rateRemote" data-id="${m.id}" style="background-image:url(${posterURL(m.id) || m.poster})"></div><div class="cap">${esc(m.title)} ${m.year||''}</div></div>`;
 const searching = () => (S.gridQ || '').trim().length > 0;
