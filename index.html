@@ -475,21 +475,38 @@ function predict(u, m){
   return {value: all.length ? avg(all) : 3, seen:false};
 }
 
-/* genres: {Drama:'like'|'no'} */
+/* Qué tanto le gusta a un usuario la categoría de una película (promedio de sus notas en esos géneros; si no tiene datos, su promedio general) */
+function genreAffinity(u, m){
+  const gm = genreMeans(u.ratings||{});
+  const vals = m.genres.map(g => gm[g]).filter(v => v !== undefined);
+  if (vals.length) return avg(vals);
+  const all = rated(u).map(id => u.ratings[id]);
+  return all.length ? avg(all) : 3;
+}
+const LIKE_MIN = 3.5;
+
+/* Recomendaciones para un grupo. Pesos:
+   50% que nadie (o casi nadie) la haya visto · 30% que la categoría le guste a todos o a la mayoría · 20% nota esperada del grupo.
+   Orden: primero las que nadie vio; dentro de cada tramo, por puntaje. genres: {Drama:'like'|'no'} */
 function groupRecs(users, genres={}){
   const like = Object.keys(genres).filter(g => genres[g]==='like');
   const no = Object.keys(genres).filter(g => genres[g]==='no');
-  const out = [];
+  const n = users.length, out = [];
   for (const m of MOVIES){
-    if (users.every(u => (u.ratings||{})[m.id] > 0)) continue;       // ya la vieron todos
-    if (m.genres.some(g => no.includes(g))) continue;                // género descartado
+    if (n > 1 && users.every(u => (u.ratings||{})[m.id] > 0)) continue;   // ya la vieron todos
+    if (m.genres.some(g => no.includes(g))) continue;                    // género descartado
     const preds = users.map(u => ({uid:u.uid, ...predict(u,m)}));
     const vals = preds.map(p => p.value);
-    const score = 0.7*avg(vals) + 0.3*Math.min(...vals);
-    out.push({movie:m, preds, score, pct: clamp(Math.round(score/5*100),1,99),
-              liked: m.genres.some(g => like.includes(g)), seenBy: preds.filter(p=>p.seen).map(p=>p.uid)});
+    const seenBy = preds.filter(p => p.seen).map(p => p.uid);
+    const unseen = 1 - seenBy.length / n;                                // 1 = nadie la vio
+    const likers = users.filter(u => genreAffinity(u,m) >= LIKE_MIN).length;
+    const consensus = likers / n;                                        // 1 = a todos les gusta la categoría
+    const appeal = (0.7*avg(vals) + 0.3*Math.min(...vals)) / 5;
+    const score = 0.5*unseen + 0.3*consensus + 0.2*appeal;
+    out.push({movie:m, preds, score, unseen, consensus, likers, nobodySaw: seenBy.length === 0, pct: clamp(Math.round(score*100),1,99),
+              liked: m.genres.some(g => like.includes(g)), seenBy});
   }
-  out.sort((a,b) => (b.liked - a.liked) || (b.score - a.score));
+  out.sort((a,b) => (b.liked - a.liked) || (b.nobodySaw - a.nobodySaw) || (b.score - a.score));
   return out;
 }
 
@@ -615,7 +632,7 @@ function lbMatch(items){
   return {matched, unmatched};
 }
 
-if (typeof module !== 'undefined') module.exports = {isProfane, parseCSV, lbItems, lbMatch, lbFind, lbStars, normTitle, activityFeed, popular, validUsername, BASE_IDS, registerMovie, fromTmdb, friendCode, isMutual, incomingRequests, sentRequests, MOVIES, MOVIE, GENRES, DEMO_USERS, COLORS, predict, groupRecs, similarity, twins, twinRecs, twinBanner, genreMeans, buildReviewQuestions, buildColorQuestions, leaderboard, rated};
+if (typeof module !== 'undefined') module.exports = {genreAffinity, isProfane, parseCSV, lbItems, lbMatch, lbFind, lbStars, normTitle, activityFeed, popular, validUsername, BASE_IDS, registerMovie, fromTmdb, friendCode, isMutual, incomingRequests, sentRequests, MOVIES, MOVIE, GENRES, DEMO_USERS, COLORS, predict, groupRecs, similarity, twins, twinRecs, twinBanner, genreMeans, buildReviewQuestions, buildColorQuestions, leaderboard, rated};
 
 /* ---------- Filtro de malas palabras (los mensajes se difuminan; se pueden mostrar con un toque) ---------- */
 const BAD_STEMS = ['boludo','pelotudo','pelotud','forro','hijo de puta','hijoputa','hdp','hijueputa','puta','puto','putita','mierda','carajo','cagar','cagada','cagón','concha','conchudo','conchuda','verga','pija','pijudo','poronga','chota','culo','culiado','culeado','orto','cojudo','coger','garcha','garchar','gilipollas','capullo','marica','maricon','mariconazo','trolo','sorete','chupapija','chupame','pajero','paja','mogolico','mogólico','retrasado','subnormal','imbecil','idiota','estupido','boluda','pelotuda','malparido','gonorrea','zorra','perra','cabron','joder','jodete','andate a la mierda','la puta madre','lpm','ctm','fuck','fucker','fucking','shit','bitch','bastard','asshole','dick','cunt','slut','whore','nigger','faggot','retard'];
@@ -659,7 +676,7 @@ function LocalDB(){
   const KEY = 'gpd2_v1';
   const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch(e){ return {}; } };
   const write = d => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e){} };
-  const base = () => { const d = read(); d.users = d.users||{}; d.chats = d.chats||{}; d.rooms = d.rooms||{}; d.movies = d.movies||{}; d.accounts = d.accounts||{}; d.threads = d.threads||{}; return d; };
+  const base = () => { const d = read(); d.users = d.users||{}; d.chats = d.chats||{}; d.rooms = d.rooms||{}; d.movies = d.movies||{}; d.accounts = d.accounts||{}; d.threads = d.threads||{}; d.groups = d.groups||{}; return d; };
   const listeners = new Set();
   const fire = () => listeners.forEach(f => f());
   window.addEventListener('storage', e => { if (e.key === KEY) fire(); });
@@ -695,6 +712,13 @@ function LocalDB(){
     onMovies(cb){ const f = () => cb(Object.values(base().movies)); listeners.add(f); f(); return () => listeners.delete(f); },
     async sendMsg(chatId, msg){ const d = base(); (d.chats[chatId] = d.chats[chatId] || []).push(msg); write(d); fire(); },
     onMsgs(chatId, cb){ const f = () => cb((base().chats[chatId]||[]).slice()); listeners.add(f); f(); return () => listeners.delete(f); },
+    async setGroup(id, g){ const d = base(); d.groups[id] = g; write(d); fire(); },
+    async getGroup(id){ return base().groups[id] || null; },
+    async updateGroup(id, patch){ const d = base(); const g = d.groups[id]; if(!g) return; for (const k in patch) setPath(g, k, patch[k]); write(d); fire(); },
+    async joinGroup(id, uid){ const d = base(); const g = d.groups[id]; if(!g) return false; if(!g.members.includes(uid)) g.members.push(uid); if(!g.people.includes(uid)) g.people.push(uid); write(d); fire(); return true; },
+    async leaveGroup(id, uid){ const d = base(); const g = d.groups[id]; if(!g) return; g.members = g.members.filter(x => x !== uid); g.people = g.people.filter(x => x !== uid); write(d); fire(); },
+    onGroups(uid, cb){ const f = () => cb(Object.values(base().groups).filter(g => g.people.includes(uid))); listeners.add(f); f(); return () => listeners.delete(f); },
+    onGroup(id, cb){ const f = () => cb(base().groups[id] || null); listeners.add(f); f(); return () => listeners.delete(f); },
     async setRoom(id, room){ const d = base(); d.rooms[id] = room; write(d); fire(); },
     async getRoom(id){ return base().rooms[id] || null; },
     async updateRoom(id, patch){ const d = base(); const r = d.rooms[id]; if(!r) return; for (const k in patch) setPath(r, k, patch[k]); write(d); fire(); },
@@ -713,7 +737,7 @@ async function FirebaseDB(cfg){
   const {createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut: fbSignOut, onAuthStateChanged} = authM;
   const mail = u => u + '@gpd2.app';
   const {deleteDoc} = fsM, {deleteUser} = authM;
-  const {doc, getDoc, setDoc, updateDoc, onSnapshot, collection, addDoc, query, orderBy, where, increment} = fsM;
+  const {doc, getDoc, setDoc, updateDoc, onSnapshot, collection, addDoc, query, orderBy, where, increment, arrayUnion, arrayRemove} = fsM;
 
   return {
     mode:'firebase',
@@ -739,6 +763,13 @@ async function FirebaseDB(cfg){
     onMovies(cb){ return onSnapshot(collection(db,'movies'), snap => cb(snap.docs.map(d => d.data()))); },
     async sendMsg(chatId, msg){ await addDoc(collection(db,'chats',chatId,'messages'), msg); },
     onMsgs(chatId, cb, onErr){ return onSnapshot(query(collection(db,'chats',chatId,'messages'), orderBy('ts')), snap => cb(snap.docs.map(d => d.data())), err => { console.error('chat', err); if (onErr) onErr(err); }); },
+    async setGroup(id, g){ await setDoc(doc(db,'groups',id), g); },
+    async getGroup(id){ const s = await getDoc(doc(db,'groups',id)); return s.exists() ? s.data() : null; },
+    async updateGroup(id, patch){ await updateDoc(doc(db,'groups',id), patch); },
+    async joinGroup(id, uid){ const s = await getDoc(doc(db,'groups',id)); if (!s.exists()) return false; await updateDoc(doc(db,'groups',id), {members: arrayUnion(uid), people: arrayUnion(uid)}); return true; },
+    async leaveGroup(id, uid){ await updateDoc(doc(db,'groups',id), {members: arrayRemove(uid), people: arrayRemove(uid)}); },
+    onGroups(uid, cb, onErr){ return onSnapshot(query(collection(db,'groups'), where('people','array-contains',uid)), snap => cb(snap.docs.map(x => x.data())), err => { console.error('groups', err); if (onErr) onErr(err); }); },
+    onGroup(id, cb){ return onSnapshot(doc(db,'groups',id), s => cb(s.exists() ? s.data() : null)); },
     async setRoom(id, room){ await setDoc(doc(db,'rooms',id), room); },
     async getRoom(id){ const s = await getDoc(doc(db,'rooms',id)); return s.exists() ? s.data() : null; },
     async updateRoom(id, patch){ await updateDoc(doc(db,'rooms',id), patch); },
@@ -780,7 +811,7 @@ const S = {
   view:'landing', tab:'home', device:'mobile', uid:null, me:null, real:{},
   match:{stage:'pick', sel:[], genres:{}, recs:[], group:[]},
   chat:{with:null, msgs:[], unsub:null}, sheet:null, room:null, roomUnsub:null, q:{stage:1, picked:null, pts:0},
-  draft:{color:COLORS[0]}, threads:{}, prevUnread:{}, threadsReady:false, auth:{mode:'signup', err:'', busy:false}, unsubs:[], pendingRoom:null, toast:null, bots:null,
+  draft:{color:COLORS[0]}, threads:{}, prevUnread:{}, threadsReady:false, auth:{mode:'signup', err:'', busy:false}, unsubs:[], pendingRoom:null, pendingGroup:null, groups:[], gid:null, group:null, toast:null, bots:null,
 };
 
 const DEMO = /[?&]demo\b/.test(location.search);   // ?demo suma usuarios de ejemplo para probar a solas
@@ -833,7 +864,7 @@ const TUT = [
   {ic:'🎬', t:'¡Bienvenido a GPD 2!', d:'Rankeás películas y la app te ayuda a elegir qué ver con tus amigos. Te mostramos las secciones en 30 segundos.'},
   {tab:'home', t:'Inicio: rankeá películas', d:'Acá están todas las películas.', todo:'Tocá una portada, ponele estrellas (podés usar medias, ej. 3.5) y guardá. Cuantas más rankees, mejores recomendaciones.'},
   {tab:'friends', t:'Amigos', d:'Para usar match, perfiles y chat necesitás amigos.', todo:'Buscá a alguien por su @usuario y tocá "Agregar". Cuando te acepte, ya son amigos: podés ver su perfil con su top 4 y chatear.'},
-  {tab:'match', t:'Match y trivias 🎮', d:'Para decidir qué ver en grupo.', todo:'Elegí a tus amigos. Después podés tocar "Buscar película" para ver cuál les gusta a todos, o "Jugar trivias con este grupo" para entretenerse mientras deciden.'},
+  {tab:'match', t:'Grupos y trivias 🎮', d:'Para decidir qué ver con amigos y jugar mientras tanto.', todo:'Creá un grupo (aunque sea sin invitados), compartí el enlace o invitá amigos desde la app. Adentro del grupo están "Buscar película" y las trivias.'},
   {tab:'twin', t:'Alma gemela', d:'Una persona que puntúa casi igual que vos.', todo:'Aparece sola cuando hay alguien compatible. Si no ves a nadie, rankeá más películas.'},
   {tab:'chat', t:'Chats', d:'Hablá con tus amigos.', todo:'Un globito naranja te avisa cuando tenés mensajes sin leer y de quién son.'},
   {chip:1, t:'Tu perfil', d:'Tocá tu nombre, arriba a la derecha.', todo:'Ahí elegís tu top 4 de películas favoritas, que ven tus amigos.'},
@@ -978,13 +1009,12 @@ function cell(m){
 }
 
 function appView(){
-  const tabs = [['home','🎬','Inicio'],['friends','👥','Amigos'],['match','✨','Match'],['twin','💞','Alma gemela'],['chat','💬','Chats']];
+  const tabs = [['home','🎬','Inicio'],['friends','👥','Amigos'],['match','✨','Grupos'],['twin','💞','Alma gemela'],['chat','💬','Chats']];
   let body = '';
   if (S.prof) body = profileView(S.prof);
   else if (S.tab === 'home') body = homeTab();
   else if (S.tab === 'friends') body = friendsTab();
   else if (S.tab === 'match') body = matchTab();
-  else if (S.tab === 'trivia') body = triviaTab();
   else if (S.tab === 'twin') body = twinTab();
   else if (S.tab === 'chat') body = chatTab();
   return `<div class="head">${logo()}<div class="chip ${S.tut!=null && TUT[S.tut] && TUT[S.tut].chip?'spot':''}" data-act="profile" data-id="${S.uid}" style="cursor:pointer">${esc(S.me.name)} ${av(S.me,'sm')}<button class="btn sm ghost" data-act="logout">Salir</button></div></div>
@@ -1006,7 +1036,7 @@ function homeTab(){
     ${feed.length ? `<div class="feed">${feed.map(a => `<div class="fitem">${poster(a.movie.id)}<div class="cap"><b style="color:#fff">${esc(a.user.name)}</b> · <span style="color:var(--green)">${stars(a.stars)}</span><br>${esc(a.movie.title)}${a.ts ? `<br><span style="color:var(--low)">hace ${ago(a.ts)}</span>` : ''}</div></div>`).join('')}</div>`
       : `<div class="card muted">Todavía no hay novedades. <button class="lnk" data-act="tab" data-id="friends">Buscá a tus amigos por nombre de usuario</button>.</div>`}
     ${pop.length ? `<div class="sec">Populares entre vos y tus amigos</div><div class="feed">${pop.map(p => `<div class="fitem">${poster(p.movie.id)}<div class="cap"><b style="color:#fff">${esc(p.movie.title)}</b><br><span style="color:var(--green)">${p.avg.toFixed(1)} ★</span> · ${p.n} ${p.n===1?'persona':'personas'}</div></div>`).join('')}</div>` : ''}
-    <div class="card" style="margin:6px 0 14px"><div class="row"><div class="grow"><h3 style="margin:0">🎮 Trivias con amigos</h3><p class="sub" style="margin:4px 0 0">Armá un grupo en Match y jueguen mientras eligen qué ver.</p></div><button class="btn sm" data-act="tab" data-id="match">Ir a Match</button></div></div>
+    <div class="card" style="margin:6px 0 14px"><div class="row"><div class="grow"><h3 style="margin:0">🎮 Trivias con amigos</h3><p class="sub" style="margin:4px 0 0">Creá un grupo en la pestaña Grupos y jueguen mientras eligen qué ver.</p></div><button class="btn sm" data-act="tab" data-id="match">Ir a Grupos</button></div></div>
     <div class="sec">Tus películas <button class="lnk" data-act="tutOpen" style="float:right;text-transform:none;letter-spacing:0">¿Cómo funciona? Ver tutorial</button></div>
     ${importBox()}${searchBox()}${filterBox()}${genreBar()}<div class="grid">${myGrid()}</div>${pager()}`;
 }
@@ -1039,21 +1069,48 @@ function friendsTab(){
       <div class="people">${q ? list(found,'other','No encontré a nadie con ese usuario.') : '<div class="muted">Escribí el usuario de tu amigo para encontrarlo.</div>'}</div></div></div>`;
 }
 
+const groupLink = id => (location.origin === 'null' || location.protocol === 'file:' ? location.href.split('?')[0] : location.origin + location.pathname) + '?group=' + id;
+const gMembers = g => (g.members||[]).map(id => id === S.uid ? S.me : userOf(id)).filter(Boolean);
+const roomLive = g => g && g.activeRoom && Date.now() - (g.activeRoom.ts||0) < 3*3600*1000 ? g.activeRoom : null;
 function matchTab(){
-  const M = S.match;
+  if (S.gid) return groupView();
+  const M = S.match, fr = myFriends().map(userOf);
+  const mine = (S.groups||[]).slice().sort((x,y) => (y.created||0) - (x.created||0));
+  const row = g => { const joined = (g.members||[]).includes(S.uid), host = userOf(g.host) || {name:'?'};
+    return `<div class="person" data-act="openGroup" data-id="${g.id}" style="cursor:pointer"><div class="avs">${gMembers(g).slice(0,3).map(u => av(u,'sm')).join('')}</div><div class="grow"><b>${esc(g.name||'Grupo')}</b><div class="muted">${(g.members||[]).length} integrante${(g.members||[]).length===1?'':'s'} · creado por ${g.host===S.uid?'vos':esc(host.name)}${roomLive(g)?' · <span style="color:var(--green)">🎮 trivia en curso</span>':''}</div></div>${joined ? '<span class="muted">Entrar ›</span>' : '<span class="btn sm">Unirme</span>'}</div>`; };
+  return `<h1>Grupos</h1><p class="sub">Un grupo es para decidir qué ver con tus amigos y jugar trivias mientras tanto. Lo armás vos y los demás entran desde la app o con un enlace.</p>
+    ${mine.length ? `<div class="sec">Tus grupos (${mine.length})</div><div class="people">${mine.map(row).join('')}</div>` : ''}
+    <div class="sec">Crear un grupo nuevo</div>
+    <input class="inp" id="gname" maxlength="30" placeholder="Nombre del grupo (opcional)" value="${esc(M.gname||'')}" style="margin-bottom:10px">
+    ${fr.length ? `<div class="muted" style="margin-bottom:6px">Invitá amigos (podés sumar más después con el enlace):</div><div class="people">${fr.map(u => `<div class="person ${M.sel.includes(u.uid)?'sel':''}" data-act="toggleSel" data-id="${u.uid}">${av(u)}<b class="grow">${esc(u.name)}</b><span>${M.sel.includes(u.uid)?'✓':''}</span></div>`).join('')}</div>`
+      : `<div class="muted" style="margin-bottom:8px">Todavía no tenés amigos confirmados, pero igual podés crear el grupo y compartir el enlace.</div>`}
+    <div style="margin-top:14px"><button class="btn block" data-act="createGroup">Crear grupo${M.sel.length ? ' con ' + M.sel.length + ' invitado' + (M.sel.length===1?'':'s') : ''}</button></div>`;
+}
+function groupView(){
+  const g = S.group, M = S.match;
+  if (!g) return `<button class="back" data-act="closeGroup">← Mis grupos</button><div class="card muted">Cargando grupo…</div>`;
+  const joined = (g.members||[]).includes(S.uid);
   if (M.stage === 'loading') return matchLoading();
   if (M.stage === 'results') return matchResults();
-  if (M.stage === 'games') return matchGames();
-  const fr = myFriends().map(userOf);
-  if (!fr.length) return `<h1>Match</h1><p class="sub">Para armar un match primero necesitás amigos.</p><button class="btn" data-act="tab" data-id="friends">Agregar amigos</button>`;
-  return `<h1>Match con amigos</h1><p class="sub">Elegí con quiénes mirar algo y, si querés, qué géneros sí o no.</p>
-    <div class="sec">¿Con quiénes?</div>
-    <div class="people">${fr.map(u => `<div class="person ${M.sel.includes(u.uid)?'sel':''}" data-act="toggleSel" data-id="${u.uid}">${av(u)}<b class="grow">${esc(u.name)}</b><span>${M.sel.includes(u.uid)?'✓':''}</span></div>`).join('')}</div>
-    <div class="sec">Géneros <span style="text-transform:none;letter-spacing:0">(tocá: sí → no → neutro)</span></div>
-    <div>${GENRES.map(g => `<button class="pill ${M.genres[g]||''}" data-act="genre" data-id="${g}">${g}</button>`).join('')}</div>
-    <div style="margin-top:14px"><button class="btn block" data-act="runMatch" ${M.sel.length?'':'disabled'}>Buscar película</button></div>
-    <div class="card" style="margin-top:14px"><h3>🎮 ¿Mientras esperan, juegan?</h3><p class="sub" style="margin:4px 0 10px">Armá el grupo y jugá trivias (adivinar de quién es una reseña o la portada de una película) mientras deciden qué ver.</p><button class="btn ghost block" data-act="matchGames" ${M.sel.length?'':'disabled'}>🎮 Jugar trivias con este grupo</button></div>`;
+  const link = groupLink(g.id), live = roomLive(g);
+  const pending = (g.people||[]).filter(id => !(g.members||[]).includes(id)).map(userOf).filter(Boolean);
+  return `<button class="back" data-act="closeGroup">← Mis grupos</button>
+    <h1 style="margin-bottom:4px">${esc(g.name||'Grupo')}</h1>
+    <div class="people" style="margin-bottom:10px">${gMembers(g).map(u => `<div class="person">${av(u)}<b class="grow">${esc(u.name)}${u.uid===g.host?' <span class="tag">creador</span>':''}${u.uid===S.uid?' (vos)':''}</b><span style="color:var(--green)">✓ adentro</span></div>`).join('')}
+      ${pending.map(u => `<div class="person" style="opacity:.6">${av(u)}<b class="grow">${esc(u.name)}</b><span class="muted">invitado · todavía no entró</span></div>`).join('')}</div>
+    <div class="sharebar"><span>🔗 ${esc(link)}</span><button class="btn sm" data-act="copyLink" data-id="${esc(link)}">Copiar enlace</button></div>
+    ${joined ? `
+    ${live ? `<div class="card" style="border-color:var(--green)"><h3 style="margin:0">🎮 Hay una trivia en curso</h3><p class="sub" style="margin:4px 0 10px">${live.kind==='review'?'¿Quién la escribió?':'Adiviná la portada'} · empezada por ${esc((userOf(live.by)||{name:'alguien'}).name)}</p><button class="btn block" data-act="joinLiveRoom" data-id="${live.id}">Unirme a la trivia</button></div>` : ''}
+    <div class="sec">🎬 ¿Qué ven?</div>
+    <p class="sub" style="margin:0 0 8px">Tocá los géneros: sí → no → neutro. Te mostramos 5 opciones, priorizando las que nadie vio y las categorías que les gustan a casi todos.</p>
+    <div>${GENRES.map(x => `<button class="pill ${M.genres[x]||''}" data-act="genre" data-id="${x}">${x}</button>`).join('')}</div>
+    <div style="margin:10px 0 18px"><button class="btn block" data-act="runMatch">Buscar película</button></div>
+    <div class="sec">🎮 ¿Mientras esperan, juegan?</div>${triviaCards()}
+    <div style="margin-top:20px"><button class="btn ghost block" data-act="leaveGroup">Salir del grupo</button></div>`
+    : `<div class="card" style="margin-top:12px"><h3>Te invitaron a este grupo</h3><p class="sub" style="margin:4px 0 10px">Entrá para ver las recomendaciones y jugar las trivias con los demás.</p><button class="btn block" data-act="joinGroup" data-id="${g.id}">Unirme al grupo</button></div>`}`;
 }
+const triviaCards = () => `<div class="cols"><div class="card" style="margin-bottom:12px"><h3>🕵️ ¿Quién la escribió?</h3><p class="sub">Reseñas anónimas: adiviná de quién es cada una (incluso las tuyas).</p><button class="btn block" data-act="startRoom" data-id="review">Jugar</button></div>
+    <div class="card" style="margin-bottom:12px"><h3>🎨 Adiviná la portada</h3><p class="sub">La portada se ve borrosa y se aclara con pistas de género y colores.</p><button class="btn block" data-act="startRoom" data-id="color">Jugar</button></div></div>`;
 function matchLoading(){
   const g = S.match.group;
   const sats = g.slice(1).map((u,i) => { const a = (i/(g.length-1))*2*Math.PI - Math.PI/2; return `<div class="sat" style="transform:translate(${Math.cos(a)*82}px,${Math.sin(a)*82}px);animation-delay:${i*.2}s">${av(u)}</div>`; }).join('');
@@ -1061,34 +1118,19 @@ function matchLoading(){
     <div><h2>Buscando coincidencias…</h2><div class="muted">Cruzando los gustos de ${g.length} personas</div></div></div>`;
 }
 function matchResults(){
-  const M = S.match;
-  return `<button class="back" data-act="matchReset">← Cambiar grupo</button>
+  const M = S.match, n = Math.min(M.shown || 5, M.recs.length);
+  return `<button class="back" data-act="matchReset">← Volver al grupo</button>
     <div class="row"><div class="avs">${M.group.map(u => av(u,'sm')).join('')}</div><h2 class="grow">Para ver juntos</h2></div>
-    <div class="card" style="margin:10px 0"><div class="row"><div class="grow"><h3 style="margin:0">🎮 ¿Todavía no se deciden?</h3><p class="sub" style="margin:4px 0 0">Jueguen una trivia en grupo mientras eligen.</p></div><button class="btn sm" data-act="matchGames">Jugar</button></div></div>
-    <p class="sub">% de cuánto le puede gustar al grupo.</p>
-    ${M.recs.length ? `<div class="recs">${M.recs.map(r => `<div class="rec">${poster(r.movie.id)}<div class="grow">
+    <p class="sub">El % combina que nadie la haya visto, que la categoría le guste al grupo y la nota esperada.</p>
+    ${n ? `<div class="recs">${M.recs.slice(0,n).map(r => `<div class="rec">${poster(r.movie.id)}<div class="grow">
       <b>${esc(r.movie.title)}</b> <span class="muted">${r.movie.year}</span>
       <div>${r.movie.genres.map(g => `<span class="tag">${g}</span>`).join('')}${r.liked?'<span class="tag" style="color:var(--green)">tu género</span>':''}</div>
       <div class="bar"><i style="width:${r.pct}%"></i></div>
-      <div class="muted" style="margin-top:5px">${r.seenBy.length ? 'Ya la vieron: ' + r.seenBy.map(id => esc(userOf(id).name)).join(', ') : 'Nadie la vio todavía'}</div>
-      </div><div class="pct">${r.pct}%</div></div>`).join('')}</div>` : '<div class="card muted">No hay películas nuevas que cumplan esos filtros. Probá con menos géneros descartados.</div>'}`;
-}
-function triviaTab(){
-  const fr = myFriends().map(userOf), sel = S.tsel || [];
-  const games = `<div class="cols"><div class="card" style="margin-bottom:12px"><h3>🕵️ ¿Quién la escribió?</h3><p class="sub">Aparece una reseña anónima y tenés que adivinar de qué amigo (o tuya) es.</p><button class="btn block" data-act="startTrivia" data-id="review" ${sel.length?'':'disabled'}>Jugar</button></div>
-    <div class="card" style="margin-bottom:12px"><h3>🎨 Adiviná la portada</h3><p class="sub">La portada se ve borrosa y se va aclarando con pistas de género y colores.</p><button class="btn block" data-act="startTrivia" data-id="color" ${sel.length?'':'disabled'}>Jugar</button></div></div>`;
-  if (!fr.length) return `<h1>🎮 Trivias</h1><p class="sub">Las trivias se juegan con amigos. Primero agregá a alguien y esperá que te acepte.</p><button class="btn" data-act="tab" data-id="friends">Agregar amigos</button>`;
-  return `<h1>🎮 Trivias</h1><p class="sub">Jugá con tus amigos: se arma una sala con un enlace para compartir, hay puntaje en vivo y podio.</p>
-    <div class="sec">1. Elegí con quién jugar</div>
-    <div class="people">${fr.map(u => `<div class="person ${sel.includes(u.uid)?'sel':''}" data-act="toggleTsel" data-id="${u.uid}">${av(u)}<b class="grow">${esc(u.name)}</b><span>${sel.includes(u.uid)?'✓':''}</span></div>`).join('')}</div>
-    <div class="sec">2. Elegí el juego ${sel.length ? '' : '<span style="text-transform:none;letter-spacing:0">(primero elegí al menos un amigo)</span>'}</div>${games}`;
-}
-function matchGames(){
-  return `<button class="back" data-act="matchBack">← Volver al match</button><h1>🎮 Trivias</h1>
-    <div class="row" style="margin:4px 0 10px"><div class="avs">${S.match.group.map(u => av(u,'sm')).join('')}</div></div>
-    <p class="sub">Se juega con el grupo del match. Compartí el enlace para que todos jueguen a la vez; hay puntaje y podio.</p>
-    <div class="cols"><div class="card" style="margin-bottom:12px"><h3>🕵️ ¿Quién la escribió?</h3><p class="sub">Reseñas anónimas de tus amigos: adiviná de quién es cada una.</p><button class="btn block" data-act="startRoom" data-id="review">Crear sala</button></div>
-    <div class="card"><h3>🎨 Adiviná la portada</h3><p class="sub">Pistas de género y gama de colores mientras la portada se va coloreando.</p><button class="btn block" data-act="startRoom" data-id="color">Crear sala</button></div></div>`;
+      <div class="muted" style="margin-top:5px">${r.nobodySaw ? '✨ Nadie la vio todavía' : 'Ya la vieron: ' + r.seenBy.map(id => esc(userOf(id).name)).join(', ')} · ${r.likers} de ${M.group.length} disfrutan este género</div>
+      </div><div class="pct">${r.pct}%</div></div>`).join('')}</div>
+      <div style="text-align:center;margin:14px 0">${n < M.recs.length ? `<button class="btn block" data-act="moreRecs">Ver 5 más (${n} de ${M.recs.length})</button>` : '<div class="muted">No hay más opciones con estos filtros.</div>'}</div>`
+      : '<div class="card muted">No hay películas nuevas que cumplan esos filtros. Probá con menos géneros descartados.</div>'}
+    <div class="card" style="margin:10px 0"><div class="row"><div class="grow"><h3 style="margin:0">🎮 ¿Todavía no se deciden?</h3><p class="sub" style="margin:4px 0 0">Jueguen una trivia mientras eligen.</p></div><button class="btn sm" data-act="matchReset">Jugar</button></div></div>`;
 }
 
 function twinTab(){
@@ -1217,6 +1259,15 @@ async function startSession(){
   S.unsubs.push(DB.onMovies(list => { let n = 0; list.forEach(m => { if (registerMovie(m)) n++; }); if (n && S.me) softRender(); }));
   S.threads = {}; S.prevUnread = {}; S.threadsReady = false;
   S.unsubs.push(DB.onThreads(S.uid, onThreads, err => { if (!S.threadsWarned){ S.threadsWarned = true; toast('No se pueden leer los mensajes pendientes (' + (err.code || err.message) + '). Falta publicar las reglas nuevas de Firestore.'); } }));
+  S.groups = [];
+  S.unsubs.push(DB.onGroups(S.uid, list => {
+    const known = new Set((S.groups||[]).map(g => g.id));
+    list.forEach(g => { if (S.groupsReady && !known.has(g.id) && g.host !== S.uid && !(g.members||[]).includes(S.uid)) toast('👥 ' + ((userOf(g.host)||{}).name || 'Alguien') + ' te invitó al grupo "' + (g.name||'Grupo') + '"'); });
+    S.groups = list; S.groupsReady = true;
+    if (S.gid){ const cur = list.find(g => g.id === S.gid); if (cur && !S.group) S.group = cur; }
+    if (S.me) softRender();
+  }, err => { if (!S.groupsWarned){ S.groupsWarned = true; toast('No se pueden leer los grupos (' + (err.code || err.message) + '). Falta publicar las reglas nuevas de Firestore.'); } }));
+  S.groupsReady = false;
   let first = true;
   await new Promise((res, rej) => { S.unsubs.push(DB.onUsers(list => {
     S.real = Object.fromEntries(list.map(u => [u.uid, u]));
@@ -1238,7 +1289,7 @@ function teardown(){
 }
 function resetState(){
   S.threads = {}; S.prevUnread = {}; S.threadsReady = false; S.uid = null; S.resume = null; S.me = null; S.real = {}; S.room = null; S.chat.with = null; S.freshSignup = false; S.gridQ = ''; S.tut = null; S.notice = ''; S.prof = null; S.pick = null;
-  S.match = {stage:'pick', sel:[], genres:{}, recs:[], group:[]};
+  S.match = {stage:'pick', sel:[], genres:{}, recs:[], group:[], shown:5, gname:''}; S.gid = null; S.group = null; S.groups = []; if (S.groupUnsub){ S.groupUnsub(); S.groupUnsub = null; }
 }
 function onThreads(list){
   S.threads = Object.fromEntries(list.map(t => [t.id, t]));
@@ -1265,19 +1316,48 @@ function afterLogin(){
   S.view = rated(S.me).length >= 5 ? 'app' : 'onboard';
   render();
   if (S.view === 'app' && S.pendingRoom){ const id = S.pendingRoom; S.pendingRoom = null; openRoom(id); }
+  if (S.view === 'app' && S.pendingGroup){ const id = S.pendingGroup; S.pendingGroup = null; history.replaceState(null, '', location.pathname);
+    DB.joinGroup(id, S.uid).then(ok => { if (ok){ openGroup(id); toast('✅ Entraste al grupo'); } else toast('No encontré ese grupo'); }).catch(() => toast('No pude entrar al grupo')); }
 }
 
+function closeGroup(){
+  if (S.groupUnsub){ S.groupUnsub(); S.groupUnsub = null; }
+  S.gid = null; S.group = null; S.match.stage = 'pick'; S.match.recs = []; render();
+}
+function openGroup(id){
+  if (S.groupUnsub){ S.groupUnsub(); S.groupUnsub = null; }
+  S.gid = id; S.group = (S.groups||[]).find(g => g.id === id) || null; S.tab = 'match'; S.match.stage = 'pick'; S.match.recs = []; render();
+  let lastRoom = null;
+  S.groupUnsub = DB.onGroup(id, g => {
+    if (S.gid !== id) return;
+    if (!g){ S.gid = null; S.group = null; toast('Ese grupo ya no existe'); return render(); }
+    const live = roomLive(g);
+    if (live && lastRoom !== null && live.id !== lastRoom && live.by !== S.uid) toast('🎮 ' + ((userOf(live.by)||{}).name || 'Alguien') + ' empezó una trivia en el grupo');
+    lastRoom = live ? live.id : '';
+    S.group = g; if (S.view === 'app') softRender();
+  });
+}
+async function createGroup(){
+  const M = S.match, id = Math.random().toString(36).slice(2,8) + Math.random().toString(36).slice(2,5);
+  const name = ((($('#gname')||{}).value) || M.gname || '').trim() || ('Grupo de ' + S.me.name);
+  const demos = M.sel.filter(u => (userOf(u) || {}).demo);
+  const g = {id, name, host:S.uid, members:[S.uid, ...demos], people:[...new Set([S.uid, ...M.sel])], created:Date.now()};
+  await DB.setGroup(id, g);
+  M.sel = []; M.gname = '';
+  openGroup(id); toast('✅ Grupo creado. Los invitados lo ven en su pestaña Grupos.');
+}
 async function runMatch(){
   const M = S.match;
-  M.group = [S.me, ...M.sel.map(userOf)];
+  M.group = gMembers(S.group);
   M.stage = 'loading'; render();
-  await new Promise(r => setTimeout(r, 2000));
-  M.recs = groupRecs(M.group, M.genres);
+  await new Promise(r => setTimeout(r, 1500));
+  M.recs = groupRecs(M.group, M.genres); M.shown = 5;
   M.stage = 'results'; render();
 }
 
 async function startRoom(kind){
-  const M = S.match, users = M.group.map(u => userOf(u.uid));
+  if (!S.group) return toast('Primero entrá a un grupo');
+  const users = gMembers(S.group).map(u => userOf(u.uid));
   let questions;
   if (kind === 'review'){
     questions = buildReviewQuestions(users, 5);
@@ -1287,8 +1367,9 @@ async function startRoom(kind){
   const players = {}, scores = {}, progress = {};
   players[S.uid] = {name:S.me.name, color:S.me.color}; scores[S.uid] = 0; progress[S.uid] = 0;
   users.filter(u => u.demo).forEach(u => { players[u.uid] = {name:u.name, color:u.color}; scores[u.uid] = 0; progress[u.uid] = 0; });
-  const room = {id, kind, host:S.uid, participants:users.map(u => u.uid), questions, players, scores, progress, created:Date.now()};
+  const room = {id, kind, host:S.uid, gid:S.gid, participants:users.map(u => u.uid), questions, players, scores, progress, created:Date.now()};
   await DB.setRoom(id, room);
+  DB.updateGroup(S.gid, {activeRoom:{id, kind, by:S.uid, ts:Date.now()}}).catch(() => {});
   openRoom(id);
 }
 
@@ -1326,8 +1407,7 @@ function startBots(id){
 function stopBots(){ if (S.bots){ clearInterval(S.bots); S.bots = null; } }
 function leaveRoom(){
   if (S.roomUnsub){ S.roomUnsub(); S.roomUnsub = null; }
-  stopBots(); S.room = null; S.view = 'app'; S.tab = 'match';
-  S.match.stage = S.match.group.length ? 'games' : 'pick';
+  stopBots(); S.room = null; S.view = 'app'; S.tab = 'match'; S.match.stage = 'pick';
   history.replaceState(null, '', location.pathname); render();
 }
 
@@ -1453,11 +1533,14 @@ document.addEventListener('click', async e => {
     case 'toggleSel': { const s = S.match.sel; const k = s.indexOf(id); if (k >= 0) s.splice(k,1); else s.push(id); render(); break; }
     case 'genre': { const g = S.match.genres, cur = g[id]; if (!cur) g[id] = 'like'; else if (cur === 'like') g[id] = 'no'; else delete g[id]; render(); break; }
     case 'runMatch': runMatch(); break;
-    case 'matchReset': S.match.stage = 'pick'; render(); break;
-    case 'toggleTsel': { const s = S.tsel = S.tsel || []; const k = s.indexOf(id); if (k >= 0) s.splice(k,1); else s.push(id); render(); break; }
-    case 'startTrivia': S.match.group = [S.me, ...(S.tsel||[]).map(userOf)]; startRoom(id); break;
-    case 'matchGames': { const M = S.match; if (!M.group.length || M.stage === 'pick') M.group = [S.me, ...M.sel.map(userOf)]; M.from = M.stage === 'results' ? 'results' : 'pick'; M.stage = 'games'; render(); break; }
-    case 'matchBack': S.match.stage = S.match.from || 'results'; render(); break;
+    case 'moreRecs': S.match.shown = (S.match.shown || 5) + 5; render(); break;
+    case 'createGroup': await createGroup(); break;
+    case 'openGroup': openGroup(id); break;
+    case 'closeGroup': closeGroup(); break;
+    case 'joinGroup': await DB.joinGroup(id, S.uid); toast('¡Ya estás en el grupo!'); break;
+    case 'leaveGroup': { const gid = S.gid; closeGroup(); await DB.leaveGroup(gid, S.uid); toast('Saliste del grupo'); break; }
+    case 'joinLiveRoom': openRoom(id); break;
+    case 'matchReset': S.match.stage = 'pick'; render(); { const m = $('.main'); if (m) m.scrollTop = 0; } break;
     case 'startRoom': startRoom(id); break;
     case 'leaveRoom': leaveRoom(); break;
     case 'copyLink': try { await navigator.clipboard.writeText(id); toast('Enlace copiado'); } catch(_) { window.prompt('Copiá el enlace:', id); } break;
@@ -1481,7 +1564,7 @@ document.addEventListener('click', async e => {
   }
 });
 document.addEventListener('keydown', e => { if (e.key !== 'Enter') return; const id = e.target.id; if (id === 'msgin') sendMsg(); else if (id === 'tq') tmdbGo(); else if (id === 'au' || id === 'ap') doAuth(); });
-document.addEventListener('input', e => { const id = e.target.id; if (id === 'pq'){ S.pickQ = e.target.value; render(); const i = $('#pq'); if (i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } return; }
+document.addEventListener('input', e => { const id = e.target.id; if (id === 'gname'){ S.match.gname = e.target.value; return; } if (id === 'pq'){ S.pickQ = e.target.value; render(); const i = $('#pq'); if (i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } return; }
   if (id === 'fq' || id === 'gq'){ if (id === 'fq') S.friendQ = e.target.value; else { S.gridQ = e.target.value; S.gridP = 1; } render(); const i = $('#' + id); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } } });
 window.addEventListener('resize', () => { const d = window.innerWidth >= 900 ? 'desktop' : 'mobile'; if (d !== S.device) softRender(); });
 
@@ -1491,11 +1574,13 @@ window.addEventListener('resize', () => { const d = window.innerWidth >= 900 ? '
     DB = await openDB();
     const roomParam = (location.search.match(/[?&]room=([\w-]+)/) || [])[1];
     if (roomParam) S.pendingRoom = roomParam;
+    const groupParam = (location.search.match(/[?&]group=([\w-]+)/) || [])[1];
+    if (groupParam) S.pendingGroup = groupParam;
     S.uid = await DB.init();
     if (S.uid){
       const name = DB.username(S.uid);
       if (!name){ await DB.signOut(); S.uid = null; render(); }           // sesión anónima vieja
-      else if (S.pendingRoom) await startSession();                        // entran directo desde un enlace de sala
+      else if (S.pendingRoom || S.pendingGroup) await startSession();                        // entran directo desde un enlace de sala
       else { S.resume = {uid:S.uid, name}; S.view = 'landing'; render(); } // siempre se ve la portada primero
     } else render();
   } catch(e){
