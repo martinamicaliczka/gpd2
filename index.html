@@ -660,7 +660,7 @@ const FIREBASE_CONFIG = {
   appId: "1:1007240411634:web:2e0bf2169e9e683d3e936b"
 };
 /* Token de lectura de TMDB (themoviedb.org > Ajustes > API > "Token de acceso de lectura de la API"). Si queda en null, se usan las 12 películas incluidas. */
-const TMDB_TOKEN = null;
+const TMDB_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJmMDA5OGNjYTQwNGI3MTkwMjgyYzJmMDFmMWFhMzU4MCIsIm5iZiI6MTc5MjQxNTQ4Ni4wNSwic3ViIjoiNmFkNjE2ZmUzZTVmMGI1ZGE3Nzk4YjM5Iiwic2NvcGVzIjpbImFwaV9yZWFkIl0sInZlcnNpb24iOjF9.DAkE0EmJ8Zi_byluPU8zGIJqO1p--42GNySJrbv0PIU";
 /* ejemplo:
 const FIREBASE_CONFIG = {apiKey:"...", authDomain:"...", projectId:"...", storageBucket:"...", messagingSenderId:"...", appId:"..."};
 */
@@ -788,19 +788,30 @@ async function openDB(){
 }
 
 /* ---------- TMDB ---------- */
+/* Llamada a TMDB: primero con el token (Bearer); si da 401, reintenta con la API key v3 que viene dentro del mismo token */
+async function tmdbGet(path){
+  const base = 'https://api.themoviedb.org/3/' + path;
+  let r = await fetch(base, {headers:{Authorization:'Bearer ' + TMDB_TOKEN, accept:'application/json'}});
+  if (r.status === 401){
+    let key = null; try { key = JSON.parse(atob(TMDB_TOKEN.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).aud; } catch(_){}
+    if (key) r = await fetch(base + (base.includes('?') ? '&' : '?') + 'api_key=' + key, {headers:{accept:'application/json'}});
+  }
+  if (!r.ok) throw new Error('TMDB respondió ' + r.status);
+  return r.json();
+}
 async function tmdbSearch(q){
   if (!TMDB_TOKEN || !q.trim()) return [];
-  const r = await fetch('https://api.themoviedb.org/3/search/movie?include_adult=false&language=es-AR&query=' + encodeURIComponent(q), {headers:{Authorization:'Bearer ' + TMDB_TOKEN, accept:'application/json'}});
-  if (!r.ok) throw new Error('TMDB ' + r.status);
-  return ((await r.json()).results || []).filter(x => x.poster_path).slice(0,12).map(fromTmdb);
+  const j = await tmdbGet('search/movie?include_adult=false&language=es-AR&query=' + encodeURIComponent(q));
+  return (j.results || []).filter(x => x.poster_path).slice(0,12).map(fromTmdb);
 }
 
 async function tmdbFind(title, year){
   if (!TMDB_TOKEN) return null;
-  const r = await fetch('https://api.themoviedb.org/3/search/movie?include_adult=false&language=es-AR&query=' + encodeURIComponent(title) + (year ? '&year=' + year : ''), {headers:{Authorization:'Bearer ' + TMDB_TOKEN, accept:'application/json'}});
-  if (!r.ok) return null;
-  const x = ((await r.json()).results || []).find(z => z.poster_path);
-  return x ? fromTmdb(x) : null;
+  try {
+    const j = await tmdbGet('search/movie?include_adult=false&language=es-AR&query=' + encodeURIComponent(title) + (year ? '&year=' + year : ''));
+    const x = (j.results || []).find(z => z.poster_path);
+    return x ? fromTmdb(x) : null;
+  } catch(_){ return null; }
 }
 
 /* ===== GPD 2 · interfaz ===== */
@@ -927,12 +938,12 @@ function onboardView(){
   const fresh = S.freshSignup;
   return `<div class="main"><button class="back" data-act="onbBack">← ${fresh ? 'Volver (cancela el registro)' : 'Salir'}</button><h1>Rankeá películas</h1>
     <p class="sub">Tocá una portada para ponerle estrellas (y una reseña corta si querés). Con 5 ya podemos recomendarte.</p>
-    ${importBox()}${searchBox()}${filterBox()}${genreBar()}<div class="grid">${myGrid()}</div>${pager()}
+    ${importBox()}${filterBox()}${genreBar()}<div class="grid">${myGrid()}</div>${pager()}${onlineBox()}
     <div style="position:sticky;bottom:-8px;padding-top:16px;background:linear-gradient(transparent,var(--dark) 40%)">
       <button class="btn block" data-act="finishOnboard" ${n<5?'disabled':''}>${n<5 ? `Faltan ${5-n} películas` : 'Continuar'}</button></div></div>`;
 }
 const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-const filterBox = () => `<input class="inp" id="gq" type="search" placeholder="🔍 Buscar película por título, año o género" value="${esc(S.gridQ||'')}" style="margin:6px 0 12px">`;
+const filterBox = () => `<input class="inp" id="gq" type="search" placeholder="🔍 Buscar cualquier película (título, año o género)" value="${esc(S.gridQ||'')}" style="margin:6px 0 12px">`;
 const MIN_AGE = 13;   // edad mínima para registrarse (ajustable)
 const PAGE_SIZE = 24;
 const gridList = () => {
@@ -964,12 +975,13 @@ function importBox(){
     <label class="btn sm" for="lbfile" style="display:inline-block">Elegir archivo</label><input type="file" id="lbfile" accept=".csv,.zip" hidden>
     ${msg ? `<div class="hint" style="margin-top:10px">${esc(msg)}</div>` : ''}</div>`;
 }
-function searchBox(){
+function onlineBox(){
   if (!TMDB_TOKEN) return '';
-  const R = S.search;
-  return `<div class="row" style="margin:8px 0"><input class="inp" id="tq" placeholder="Buscar cualquier película…" value="${esc(R.q)}"><button class="btn" data-act="tmdbGo">Buscar</button></div>
-    ${R.busy ? '<div class="muted">Buscando…</div>' : ''}${R.err ? `<div class="muted">${esc(R.err)}</div>` : ''}
-    ${R.res.length ? `<div class="grid" style="margin-bottom:10px">${R.res.map(m => `<div><div class="poster" data-act="rateRemote" data-id="${m.id}" style="background-image:url(${m.poster})"></div><div class="cap">${esc(m.title)} ${m.year||''}</div></div>`).join('')}</div>` : ''}
+  const R = S.search, q = (S.gridQ || '').trim();
+  if (q.length < 3) return '';
+  return `<div class="sec" style="margin-top:16px">¿No está en la lista? Resultados de la búsqueda online</div>
+    ${R.busy ? '<div class="muted">Buscando en TMDB…</div>' : ''}${R.err && !R.busy ? `<div class="muted">${esc(R.err)}</div>` : ''}
+    ${R.res.length && !R.busy ? `<div class="grid" style="margin-bottom:10px">${R.res.map(m => `<div><div class="poster" data-act="rateRemote" data-id="${m.id}" style="background-image:url(${posterURL(m.id) || m.poster})"></div><div class="cap">${esc(m.title)} ${m.year||''}</div></div>`).join('')}</div>` : ''}
     <div class="muted" style="margin-bottom:10px;font-size:11px">Datos de películas: TMDB. Este producto usa la API de TMDB pero no está avalado ni certificado por TMDB.</div>`;
 }
 const PROF_STEP = 12;
@@ -1038,7 +1050,7 @@ function homeTab(){
     ${pop.length ? `<div class="sec">Populares entre vos y tus amigos</div><div class="feed">${pop.map(p => `<div class="fitem">${poster(p.movie.id)}<div class="cap"><b style="color:#fff">${esc(p.movie.title)}</b><br><span style="color:var(--green)">${p.avg.toFixed(1)} ★</span> · ${p.n} ${p.n===1?'persona':'personas'}</div></div>`).join('')}</div>` : ''}
     <div class="card" style="margin:6px 0 14px"><div class="row"><div class="grow"><h3 style="margin:0">🎮 Trivias con amigos</h3><p class="sub" style="margin:4px 0 0">Creá un grupo en la pestaña Grupos y jueguen mientras eligen qué ver.</p></div><button class="btn sm" data-act="tab" data-id="match">Ir a Grupos</button></div></div>
     <div class="sec">Tus películas <button class="lnk" data-act="tutOpen" style="float:right;text-transform:none;letter-spacing:0">¿Cómo funciona? Ver tutorial</button></div>
-    ${importBox()}${searchBox()}${filterBox()}${genreBar()}<div class="grid">${myGrid()}</div>${pager()}`;
+    ${importBox()}${filterBox()}${genreBar()}<div class="grid">${myGrid()}</div>${pager()}${onlineBox()}`;
 }
 
 function friendsTab(){
@@ -1474,10 +1486,28 @@ async function importLetterboxd(file){
 }
 document.addEventListener('change', e => { if (e.target && e.target.id === 'lbfile') importLetterboxd(e.target.files[0]); });
 
-async function tmdbGo(){
-  const R = S.search; R.q = ($('#tq')||{}).value || R.q; R.busy = true; R.err = ''; render();
-  try { R.res = await tmdbSearch(R.q); if (!R.res.length) R.err = 'Sin resultados.'; } catch(e){ R.err = 'No pude consultar TMDB (revisá el token).'; R.res = []; }
-  R.busy = false; render();
+let tmdbTimer = null;
+function tmdbSchedule(){
+  clearTimeout(tmdbTimer);
+  const q = (S.gridQ || '').trim();
+  if (!TMDB_TOKEN || q.length < 3){ S.search.res = []; S.search.err = ''; S.search.busy = false; return; }
+  tmdbTimer = setTimeout(() => tmdbGo(q), 600);
+}
+async function tmdbGo(q){
+  const R = S.search; R.q = q; R.busy = true; R.err = ''; refreshKeepFocus();
+  try {
+    const found = await tmdbSearch(q);
+    if ((S.gridQ || '').trim() !== q) return;                                  // el usuario siguió escribiendo
+    const inList = new Set(gridList().map(m => m.id));
+    R.res = found.map(m => lbFind(m.title, m.year) || m).filter(m => !inList.has(m.id));
+    if (!R.res.length) R.err = 'No hay más resultados online.';
+  } catch(e){ R.err = 'No pude consultar TMDB: ' + (e && e.message === 'Failed to fetch' ? 'no hay conexión con TMDB (¿bloqueador de anuncios o red de la facultad?)' : (e && e.message || e)) + '.'; R.res = []; }
+  R.busy = false; refreshKeepFocus();
+}
+function refreshKeepFocus(){
+  const had = document.activeElement && document.activeElement.id === 'gq', pos = had ? document.activeElement.selectionStart : 0;
+  render();
+  if (had){ const i = $('#gq'); if (i){ i.focus(); i.setSelectionRange(pos, pos); } }
 }
 
 /* ---------- Eventos ---------- */
@@ -1557,15 +1587,14 @@ document.addEventListener('click', async e => {
       await DB.updateRoom(r.id, {['scores.'+S.uid]: ((r.scores||{})[S.uid]||0) + pts, ['progress.'+S.uid]: i+1});
       break; }
     case 'openChat': S.prof = null; openChat(id); break;
-    case 'tmdbGo': tmdbGo(); break;
-    case 'rateRemote': { const m = S.search.res.find(x => x.id === id); registerMovie(m); DB.setMovie(id, m); S.sheet = {id, stars:(S.me.ratings||{})[id]||0, text:(S.me.reviews||{})[id]||''}; render(); break; }
+    case 'rateRemote': { const m = S.search.res.find(x => x.id === id); registerMovie(m); if (String(id).startsWith('tm')) DB.setMovie(id, m); S.sheet = {id, stars:(S.me.ratings||{})[id]||0, text:(S.me.reviews||{})[id]||''}; render(); break; }
     case 'chatBack': if (S.chat.unsub) S.chat.unsub(); S.chat.unsub = null; S.chat.with = null; render(); break;
     case 'send': sendMsg(); break;
   }
 });
 document.addEventListener('keydown', e => { if (e.key !== 'Enter') return; const id = e.target.id; if (id === 'msgin') sendMsg(); else if (id === 'tq') tmdbGo(); else if (id === 'au' || id === 'ap') doAuth(); });
 document.addEventListener('input', e => { const id = e.target.id; if (id === 'gname'){ S.match.gname = e.target.value; return; } if (id === 'pq'){ S.pickQ = e.target.value; render(); const i = $('#pq'); if (i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } return; }
-  if (id === 'fq' || id === 'gq'){ if (id === 'fq') S.friendQ = e.target.value; else { S.gridQ = e.target.value; S.gridP = 1; } render(); const i = $('#' + id); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } } });
+  if (id === 'fq' || id === 'gq'){ if (id === 'fq') S.friendQ = e.target.value; else { S.gridQ = e.target.value; S.gridP = 1; tmdbSchedule(); } render(); const i = $('#' + id); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } } });
 window.addEventListener('resize', () => { const d = window.innerWidth >= 900 ? 'desktop' : 'mobile'; if (d !== S.device) softRender(); });
 
 /* ---------- Arranque ---------- */
