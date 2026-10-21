@@ -801,8 +801,15 @@ async function tmdbGet(path){
 }
 async function tmdbSearch(q){
   if (!TMDB_TOKEN || !q.trim()) return [];
-  const j = await tmdbGet('search/movie?include_adult=false&language=es-AR&query=' + encodeURIComponent(q));
-  return (j.results || []).filter(x => x.poster_path).slice(0,12).map(fromTmdb);
+  const enc = encodeURIComponent(q), out = [];
+  const first = await tmdbGet('search/movie?include_adult=false&language=es-AR&page=1&query=' + enc);
+  out.push(...(first.results || []));
+  const pages = Math.min(first.total_pages || 1, 5);                     // hasta 100 resultados
+  if (pages > 1){
+    const rest = await Promise.all(Array.from({length: pages - 1}, (_, i) => tmdbGet('search/movie?include_adult=false&language=es-AR&page=' + (i + 2) + '&query=' + enc).catch(() => ({results:[]}))));
+    rest.forEach(r => out.push(...(r.results || [])));
+  }
+  return out.filter(x => x.poster_path).map(fromTmdb);
 }
 
 async function tmdbFind(title, year){
@@ -950,8 +957,15 @@ const gridList = () => {
   const q = norm(S.gridQ||'').trim();
   return [...MOVIES].sort((x,y) => norm(x.title).replace(/[^a-z0-9]/g,'').localeCompare(norm(y.title).replace(/[^a-z0-9]/g,''))).filter(m => BASE_IDS.includes(m.id) || (S.me.ratings||{})[m.id] > 0).filter(m => !q || norm(m.title).includes(q) || String(m.year).includes(q) || m.genres.some(g => norm(g).includes(q))).filter(m => !S.gridG || m.genres.includes(S.gridG));
 };
+const remoteCell = m => `<div><div class="poster" data-act="rateRemote" data-id="${m.id}" style="background-image:url(${posterURL(m.id) || m.poster})"></div><div class="cap">${esc(m.title)} ${m.year||''}</div></div>`;
+const searching = () => (S.gridQ || '').trim().length > 0;
 const myGrid = () => {
   const list = gridList();
+  if (searching()){          // buscando: todo junto (catálogo + online), sin paginar
+    const q = (S.gridQ || '').trim(), online = (TMDB_TOKEN && q.length >= 3 && !S.search.busy) ? S.search.res : [];
+    const all = [...list.map(m => ({m, remote:false})), ...online.map(m => ({m, remote:true}))].sort((x,y) => norm(x.m.title).replace(/[^a-z0-9]/g,'').localeCompare(norm(y.m.title).replace(/[^a-z0-9]/g,'')));
+    return all.length ? all.map(x => x.remote ? remoteCell(x.m) : cell(x.m)).join('') : (S.search.busy ? '' : '<div class="muted" style="grid-column:1/-1">No encontramos esa película.</div>');
+  }
   if (S.view === 'onboard') return list.length ? list.map(cell).join('') : '<div class="muted" style="grid-column:1/-1">No encontramos esa película. Probá con otro nombre o categoría.</div>';   // al registrarse: todas, sin límite
   const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   S.gridP = Math.min(Math.max(1, S.gridP || 1), pages);
@@ -960,6 +974,7 @@ const myGrid = () => {
 };
 const genreBar = () => `<div class="gbar"><button class="pill ${!S.gridG?'like':''}" data-act="gfilter" data-id="">Todas</button>${GENRES.map(g => `<button class="pill ${S.gridG===g?'like':''}" data-act="gfilter" data-id="${g}">${g}</button>`).join('')}</div>`;
 const pager = () => {
+  if (searching()) return '';
   if (S.view === 'onboard') return `<div class="muted" style="text-align:center;margin:10px 0">${gridList().length} películas disponibles</div>`;
   const n = gridList().length, pages = Math.ceil(n / PAGE_SIZE), p = S.gridP || 1;
   if (pages <= 1) return `<div class="muted" style="text-align:center;margin:10px 0">${n} película${n===1?'':'s'}</div>`;
@@ -979,10 +994,8 @@ function onlineBox(){
   if (!TMDB_TOKEN) return '';
   const R = S.search, q = (S.gridQ || '').trim();
   if (q.length < 3) return '';
-  return `<div class="sec" style="margin-top:16px">¿No está en la lista? Resultados de la búsqueda online</div>
-    ${R.busy ? '<div class="muted">Buscando en TMDB…</div>' : ''}${R.err && !R.busy ? `<div class="muted">${esc(R.err)}</div>` : ''}
-    ${R.res.length && !R.busy ? `<div class="grid" style="margin-bottom:10px">${R.res.map(m => `<div><div class="poster" data-act="rateRemote" data-id="${m.id}" style="background-image:url(${posterURL(m.id) || m.poster})"></div><div class="cap">${esc(m.title)} ${m.year||''}</div></div>`).join('')}</div>` : ''}
-    <div class="muted" style="margin-bottom:10px;font-size:11px">Datos de películas: TMDB. Este producto usa la API de TMDB pero no está avalado ni certificado por TMDB.</div>`;
+  return `${R.busy ? '<div class="muted" style="margin:10px 0">Buscando más películas online…</div>' : ''}${R.err && !R.busy ? `<div class="muted" style="margin:10px 0">${esc(R.err)}</div>` : ''}
+    <div class="muted" style="margin:10px 0;font-size:11px">Datos de películas: TMDB. Este producto usa la API de TMDB pero no está avalado ni certificado por TMDB.</div>`;
 }
 const PROF_STEP = 12;
 function topSlots(u, mine){
@@ -1500,7 +1513,7 @@ async function tmdbGo(q){
     if ((S.gridQ || '').trim() !== q) return;                                  // el usuario siguió escribiendo
     const inList = new Set(gridList().map(m => m.id));
     R.res = found.map(m => lbFind(m.title, m.year) || m).filter(m => !inList.has(m.id));
-    if (!R.res.length) R.err = 'No hay más resultados online.';
+    if (!R.res.length) R.err = '';
   } catch(e){ R.err = 'No pude consultar TMDB: ' + (e && e.message === 'Failed to fetch' ? 'no hay conexión con TMDB (¿bloqueador de anuncios o red de la facultad?)' : (e && e.message || e)) + '.'; R.res = []; }
   R.busy = false; refreshKeepFocus();
 }
