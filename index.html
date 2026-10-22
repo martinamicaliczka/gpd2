@@ -1197,7 +1197,7 @@ function matchTab(){
   const mine = (S.groups||[]).slice().sort((x,y) => (y.created||0) - (x.created||0));
   const row = g => { const joined = (g.members||[]).includes(S.uid), host = userOf(g.host) || {name:'?'};
     return `<div class="person" data-act="openGroup" data-id="${g.id}" style="cursor:pointer"><div class="avs">${gMembers(g).slice(0,3).map(u => av(u,'sm')).join('')}</div><div class="grow"><b>${esc(g.name||'Grupo')}</b><div class="muted">${(g.members||[]).length} integrante${(g.members||[]).length===1?'':'s'} · creado por ${g.host===S.uid?'vos':esc(host.name)}${roomLive(g)?' · <span style="color:var(--green)">🎮 trivia en curso</span>':''}</div></div>${joined ? '<span class="muted">Entrar ›</span>' : '<span class="btn sm">Unirme</span>'}</div>`; };
-  return `<h1>🎮 Grupos y trivias <span class="muted" style="font-size:11px;font-weight:400">${BUILD}</span></h1><p class="sub">Un grupo es para decidir qué ver con tus amigos y jugar trivias mientras tanto. Lo armás vos y los demás entran desde la app o con un enlace.</p>
+  return `<h1>🎮 Grupos y trivias</h1><p class="sub">Un grupo es para decidir qué ver con tus amigos y jugar trivias mientras tanto. Lo armás vos y los demás entran desde la app o con un enlace.</p>
     ${mine.length ? `<div class="sec">Tus grupos (${mine.length})</div><div class="people">${mine.map(row).join('')}</div>` : ''}
     <div class="sec">Crear un grupo nuevo</div>
     <input class="inp" id="gname" maxlength="30" placeholder="Nombre del grupo (opcional)" value="${esc(M.gname||'')}" style="margin-bottom:10px">
@@ -1251,7 +1251,7 @@ function matchResults(){
   const done = n >= M.recs.length;
   return `<button class="back" data-act="matchReset">← Volver al grupo</button>
     <div class="row"><div class="avs">${M.group.map(u => av(u,'sm')).join('')}</div><h2 class="grow">Para ver juntos</h2></div>
-    <div class="muted" style="margin:-4px 0 10px;font-size:12px">Calculado con los gustos de ${M.group.length} persona${M.group.length===1?'':'s'}: ${M.group.map(u => esc(u.uid===S.uid ? 'vos' : u.name)).join(', ')} · versión ${BUILD}</div>
+    <div class="muted" style="margin:-4px 0 10px;font-size:12px">Calculado con los gustos de ${M.group.length} persona${M.group.length===1?'':'s'}: ${M.group.map(u => esc(u.uid===S.uid ? 'vos' : u.name)).join(', ')}</div>
     <p class="sub">El % es la afinidad con el grupo: qué tanto les gusta la categoría y la nota que esperamos que le pongan. Primero van las que nadie vio. Solo mostramos las que tienen buena afinidad (${MIN_PCT}% o más).</p>
     ${n ? `<div class="recs">${list}</div>
       <div style="text-align:center;margin:14px 0">${!done ? `<button class="btn block" data-act="moreRecs">Ver 5 más</button>` : '<div class="muted">🎬 Ya te mostramos todas las que tienen buena afinidad con el grupo. Rankeen más películas para afinar las recomendaciones.</div>'}</div>`
