@@ -1217,6 +1217,7 @@ function groupView(){
     <div class="sec">🎬 ¿Qué ven?</div>
     <p class="sub" style="margin:0 0 8px">Tocá los géneros: sí → no → neutro. Te mostramos de a 5, priorizando las que nadie vio y las categorías que les gustan a casi todos; podés pedir más hasta que se acaben las de buena afinidad.</p>
     <div>${GENRES.map(x => `<button class="pill ${M.genres[x]||''}" data-act="genre" data-id="${x}">${x}</button>`).join('')}</div>
+    ${pending.length ? `<div class="notice" style="margin:6px 0 10px;background:rgba(255,170,0,.12);border-color:#e0a000">⏳ Todavía ${pending.length === 1 ? 'no entró' : 'no entraron'} <b>${pending.map(u => esc(u.name)).join(', ')}</b> (tienen que tocar <b>Unirme</b> en el grupo para ver los resultados y jugar trivias). Igual podés buscar: las recomendaciones ya tienen en cuenta los gustos de todos los que invitaste.</div>` : ''}
     <div style="margin:10px 0 18px"><button class="btn block" data-act="runMatch">Buscar película</button></div>
     <div class="sec">🎮 ¿Mientras esperan, juegan?</div>${triviaCards()}
     <div style="margin-top:20px"><button class="btn ghost block" data-act="leaveGroup">Salir del grupo</button></div>`
@@ -1504,7 +1505,8 @@ async function createGroup(){
 }
 async function runMatch(){
   const M = S.match;
-  M.group = gMembers(S.group);
+  M.group = [...new Set([...(S.group.members||[]), ...(S.group.people||[])])].map(id => id === S.uid ? S.me : userOf(id)).filter(u => u && (u.uid === S.uid || !hidden(u)));   // cuenta a todos los que armaron el grupo, hayan entrado o no
+  if (M.group.length < 2){ toast('Necesitás al menos 2 personas en el grupo para buscar.'); return; }
   M.stage = 'loading'; render();
   await new Promise(r => setTimeout(r, 1500));
   M.recs = groupRecs(M.group, M.genres).filter(r => r.good); M.shown = 5;
