@@ -728,6 +728,7 @@ function LocalDB(){
     async report(r){ const d = base(); d.reports.push(r); write(d); },
     async setGroup(id, g){ const d = base(); d.groups[id] = g; write(d); fire(); },
     async getGroup(id){ return base().groups[id] || null; },
+    async deleteGroup(id){ const d = base(); delete d.groups[id]; write(d); fire(); },
     async updateGroup(id, patch){ const d = base(); const g = d.groups[id]; if(!g) return; for (const k in patch) setPath(g, k, patch[k]); write(d); fire(); },
     async joinGroup(id, uid){ const d = base(); const g = d.groups[id]; if(!g) return false; if(!g.members.includes(uid)) g.members.push(uid); if(!g.people.includes(uid)) g.people.push(uid); write(d); fire(); return true; },
     async leaveGroup(id, uid){ const d = base(); const g = d.groups[id]; if(!g) return; g.members = g.members.filter(x => x !== uid); g.people = g.people.filter(x => x !== uid); write(d); fire(); },
@@ -783,6 +784,7 @@ async function FirebaseDB(cfg){
     async report(r){ await addDoc(collection(db,'reports'), r); },
     async setGroup(id, g){ await setDoc(doc(db,'groups',id), g); },
     async getGroup(id){ const s = await getDoc(doc(db,'groups',id)); return s.exists() ? s.data() : null; },
+    async deleteGroup(id){ await deleteDoc(doc(db,'groups',id)); },
     async updateGroup(id, patch){ await updateDoc(doc(db,'groups',id), patch); },
     async joinGroup(id, uid){ const s = await getDoc(doc(db,'groups',id)); if (!s.exists()) return false; await updateDoc(doc(db,'groups',id), {members: arrayUnion(uid), people: arrayUnion(uid)}); return true; },
     async leaveGroup(id, uid){ await updateDoc(doc(db,'groups',id), {members: arrayRemove(uid), people: arrayRemove(uid)}); },
@@ -900,6 +902,9 @@ function modalView(){
     if (C.type === 'block'){ const u = userOf(C.uid);
       return `<div class="overlay modal" data-act="closeModal"><div class="sheet" data-stop="1"><h2>¿Bloquear a @${esc(u.username||u.name)}?</h2><p class="sub" style="margin:6px 0 14px">Dejan de ser amigos y ninguno de los dos va a poder verse, buscarse ni escribirse. Podés desbloquearlo desde tu perfil.</p>
         <div class="row"><button class="btn ghost grow" data-act="closeModal">Cancelar</button><button class="btn grow" style="background:#ff5a5a" data-act="doBlock" data-id="${u.uid}">Bloquear</button></div></div></div>`; }
+    if (C.type === 'delgroup'){ const g = (S.groups||[]).find(x => x.id === C.id) || S.group || {};
+      return `<div class="overlay modal" data-act="closeModal"><div class="sheet" data-stop="1"><h2>¿Eliminar "${esc(g.name||'Grupo')}"?</h2><p class="sub" style="margin:6px 0 14px">El grupo desaparece para todos los integrantes. <b style="color:#fff">No se puede deshacer.</b></p>
+        <div class="row"><button class="btn ghost grow" data-act="closeModal">Cancelar</button><button class="btn grow" style="background:#ff5a5a" data-act="doDelGroup" data-id="${esc(C.id)}">Eliminar</button></div></div></div>`; }
     if (C.type === 'delete')
       return `<div class="overlay modal" data-act="closeModal"><div class="sheet" data-stop="1"><h2>Eliminar mi cuenta</h2><p class="sub" style="margin:6px 0 10px">Se borran tu perfil, tus calificaciones y tus amistades. <b style="color:#fff">No se puede deshacer.</b> Para confirmar escribí tu usuario: <b style="color:#fff">${esc(S.me.username||S.me.name)}</b></p>
         <input class="inp" id="delconf" autocapitalize="none" placeholder="tu usuario" style="margin-bottom:12px">
@@ -1019,6 +1024,7 @@ function onboardView(){
 }
 const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 const filterBox = () => `<input class="inp" id="gq" type="search" placeholder="🔍 Buscar película por título" value="${esc(S.gridQ||'')}" style="margin:6px 0 12px">`;
+const BUILD = 'v3-' + '1022b';   // se muestra en pantallas de grupo para comprobar que se cargó la última versión
 const MIN_AGE = 13;   // edad mínima para registrarse (ajustable)
 const PAGE_SIZE = 24;
 const gridList = () => {
@@ -1191,7 +1197,7 @@ function matchTab(){
   const mine = (S.groups||[]).slice().sort((x,y) => (y.created||0) - (x.created||0));
   const row = g => { const joined = (g.members||[]).includes(S.uid), host = userOf(g.host) || {name:'?'};
     return `<div class="person" data-act="openGroup" data-id="${g.id}" style="cursor:pointer"><div class="avs">${gMembers(g).slice(0,3).map(u => av(u,'sm')).join('')}</div><div class="grow"><b>${esc(g.name||'Grupo')}</b><div class="muted">${(g.members||[]).length} integrante${(g.members||[]).length===1?'':'s'} · creado por ${g.host===S.uid?'vos':esc(host.name)}${roomLive(g)?' · <span style="color:var(--green)">🎮 trivia en curso</span>':''}</div></div>${joined ? '<span class="muted">Entrar ›</span>' : '<span class="btn sm">Unirme</span>'}</div>`; };
-  return `<h1>🎮 Grupos y trivias</h1><p class="sub">Un grupo es para decidir qué ver con tus amigos y jugar trivias mientras tanto. Lo armás vos y los demás entran desde la app o con un enlace.</p>
+  return `<h1>🎮 Grupos y trivias <span class="muted" style="font-size:11px;font-weight:400">${BUILD}</span></h1><p class="sub">Un grupo es para decidir qué ver con tus amigos y jugar trivias mientras tanto. Lo armás vos y los demás entran desde la app o con un enlace.</p>
     ${mine.length ? `<div class="sec">Tus grupos (${mine.length})</div><div class="people">${mine.map(row).join('')}</div>` : ''}
     <div class="sec">Crear un grupo nuevo</div>
     <input class="inp" id="gname" maxlength="30" placeholder="Nombre del grupo (opcional)" value="${esc(M.gname||'')}" style="margin-bottom:10px">
@@ -1220,8 +1226,8 @@ function groupView(){
     ${pending.length ? `<div class="notice" style="margin:6px 0 10px;background:rgba(255,170,0,.12);border-color:#e0a000">⏳ Todavía ${pending.length === 1 ? 'no entró' : 'no entraron'} <b>${pending.map(u => esc(u.name)).join(', ')}</b> (tienen que tocar <b>Unirme</b> en el grupo para ver los resultados y jugar trivias). Igual podés buscar: las recomendaciones ya tienen en cuenta los gustos de todos los que invitaste.</div>` : ''}
     <div style="margin:10px 0 18px"><button class="btn block" data-act="runMatch">Buscar película</button></div>
     <div class="sec">🎮 ¿Mientras esperan, juegan?</div>${triviaCards()}
-    <div style="margin-top:20px"><button class="btn ghost block" data-act="leaveGroup">Salir del grupo</button></div>`
-    : `<div class="card" style="margin-top:12px"><h3>Te invitaron a este grupo</h3><p class="sub" style="margin:4px 0 10px">Entrá para ver las recomendaciones y jugar las trivias con los demás.</p><button class="btn block" data-act="joinGroup" data-id="${g.id}">Unirme al grupo</button></div>`}`;
+    <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px"><button class="btn ghost block" data-act="leaveGroup">Salir del grupo</button>${g.host === S.uid ? `<button class="btn ghost block" style="color:#ff7a7a" data-act="askDelGroup">🗑️ Eliminar grupo para todos</button>` : ''}</div>`
+    : `<div class="card" style="margin-top:12px"><h3>Te invitaron a este grupo</h3><p class="sub" style="margin:4px 0 10px">Entrá para ver las recomendaciones y jugar las trivias con los demás.</p><button class="btn block" data-act="joinGroup" data-id="${g.id}">Unirme al grupo</button><button class="btn ghost block" style="margin-top:8px" data-act="declineGroup">Rechazar invitación</button></div>`}`;
 }
 const triviaCards = () => `<div class="cols"><div class="card" style="margin-bottom:12px"><h3>🕵️ ¿Quién la escribió?</h3><p class="sub">Reseñas anónimas: adiviná de quién es cada una (incluso las tuyas).</p><button class="btn block" data-act="startRoom" data-id="review">Jugar</button></div>
     <div class="card" style="margin-bottom:12px"><h3>🎨 Adiviná la portada</h3><p class="sub">La portada se ve borrosa y se aclara con pistas de género y colores.</p><button class="btn block" data-act="startRoom" data-id="color">Jugar</button></div></div>`;
@@ -1245,7 +1251,7 @@ function matchResults(){
   const done = n >= M.recs.length;
   return `<button class="back" data-act="matchReset">← Volver al grupo</button>
     <div class="row"><div class="avs">${M.group.map(u => av(u,'sm')).join('')}</div><h2 class="grow">Para ver juntos</h2></div>
-    <div class="muted" style="margin:-4px 0 10px;font-size:12px">Calculado con los gustos de ${M.group.length} persona${M.group.length===1?'':'s'}: ${M.group.map(u => esc(u.uid===S.uid ? 'vos' : u.name)).join(', ')} · versión 3</div>
+    <div class="muted" style="margin:-4px 0 10px;font-size:12px">Calculado con los gustos de ${M.group.length} persona${M.group.length===1?'':'s'}: ${M.group.map(u => esc(u.uid===S.uid ? 'vos' : u.name)).join(', ')} · versión ${BUILD}</div>
     <p class="sub">El % es la afinidad con el grupo: qué tanto les gusta la categoría y la nota que esperamos que le pongan. Primero van las que nadie vio. Solo mostramos las que tienen buena afinidad (${MIN_PCT}% o más).</p>
     ${n ? `<div class="recs">${list}</div>
       <div style="text-align:center;margin:14px 0">${!done ? `<button class="btn block" data-act="moreRecs">Ver 5 más</button>` : '<div class="muted">🎬 Ya te mostramos todas las que tienen buena afinidad con el grupo. Rankeen más películas para afinar las recomendaciones.</div>'}</div>`
@@ -1762,6 +1768,9 @@ document.addEventListener('click', async e => {
     case 'openGroup': openGroup(id); break;
     case 'closeGroup': closeGroup(); break;
     case 'joinGroup': await DB.joinGroup(id, S.uid); toast('¡Ya estás en el grupo!'); break;
+    case 'askDelGroup': if (S.group && S.group.host === S.uid){ S.confirm = {type:'delgroup', id:S.gid}; render(); } break;
+    case 'doDelGroup': { S.confirm = null; try { await DB.deleteGroup(id); } catch(e){ toast('No se pudo eliminar (' + (e.code || e.message) + ')'); render(); break; } closeGroup(); toast('🗑️ Grupo eliminado'); break; }
+    case 'declineGroup': { const gid = S.gid; closeGroup(); await DB.leaveGroup(gid, S.uid).catch(() => {}); toast('Rechazaste la invitación'); break; }
     case 'leaveGroup': { const gid = S.gid; closeGroup(); await DB.leaveGroup(gid, S.uid); toast('Saliste del grupo'); break; }
     case 'joinLiveRoom': openRoom(id); break;
     case 'matchReset': S.match.stage = 'pick'; render(); { const m = $('.main'); if (m) m.scrollTop = 0; } break;
