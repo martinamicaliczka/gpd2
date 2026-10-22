@@ -522,7 +522,7 @@ function similarity(a, b){
 
 /* Gemelos: usuarios que NO son amigos, ordenados por similitud */
 function twins(me, all){
-  return all.filter(u => u.uid !== me.uid && !isMutual(me,u))
+  return all.filter(u => u.uid !== me.uid && !isMutual(me,u) && !u.twinHidden && !(u.blocked||[]).includes(me.uid) && !(me.blocked||[]).includes(u.uid))
     .map(u => ({user:u, s:similarity(me,u)})).filter(x => x.s)
     .sort((a,b) => b.s.sim - a.s.sim);
 }
@@ -686,7 +686,7 @@ function LocalDB(){
   const KEY = 'gpd2_v1';
   const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch(e){ return {}; } };
   const write = d => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e){} };
-  const base = () => { const d = read(); d.users = d.users||{}; d.chats = d.chats||{}; d.rooms = d.rooms||{}; d.movies = d.movies||{}; d.accounts = d.accounts||{}; d.threads = d.threads||{}; d.groups = d.groups||{}; d.reports = d.reports||[]; return d; };
+  const base = () => { const d = read(); d.users = d.users||{}; d.chats = d.chats||{}; d.rooms = d.rooms||{}; d.movies = d.movies||{}; d.accounts = d.accounts||{}; d.threads = d.threads||{}; d.chatReqs = d.chatReqs||{}; d.groups = d.groups||{}; d.reports = d.reports||[]; return d; };
   const listeners = new Set();
   const fire = () => listeners.forEach(f => f());
   window.addEventListener('storage', e => { if (e.key === KEY) fire(); });
@@ -718,6 +718,9 @@ function LocalDB(){
     },
     async markRead(chatId, uid){ const d = base(); const t = d.threads[chatId]; if (t && t.unread && t.unread[uid]){ t.unread[uid] = 0; write(d); fire(); } },
     onThreads(uid, cb){ const f = () => cb(Object.entries(base().threads).filter(([id,t]) => t.users.includes(uid)).map(([id,t]) => Object.assign({id}, t))); listeners.add(f); f(); return () => listeners.delete(f); },
+    async setChatReq(id, data){ const d = base(); d.chatReqs[id] = Object.assign(d.chatReqs[id] || {}, data); write(d); fire(); },
+    async delChatReq(id){ const d = base(); delete d.chatReqs[id]; write(d); fire(); },
+    onChatReqs(uid, cb){ const f = () => cb(Object.entries(base().chatReqs).filter(([id,r]) => (r.users||[]).includes(uid)).map(([id,r]) => Object.assign({}, r, {id}))); listeners.add(f); f(); return () => listeners.delete(f); },
     async setMovie(id, m){ const d = base(); if(!d.movies[id]){ d.movies[id] = m; write(d); fire(); } },
     onMovies(cb){ const f = () => cb(Object.values(base().movies)); listeners.add(f); f(); return () => listeners.delete(f); },
     async sendMsg(chatId, msg){ const d = base(); (d.chats[chatId] = d.chats[chatId] || []).push(msg); write(d); fire(); },
@@ -770,6 +773,9 @@ async function FirebaseDB(cfg){
     },
     async markRead(chatId, uid){ try { await updateDoc(doc(db,'threads',chatId), {['unread.' + uid]: 0}); } catch(e){} },
     onThreads(uid, cb, onErr){ return onSnapshot(query(collection(db,'threads'), where('users','array-contains',uid)), snap => cb(snap.docs.map(x => Object.assign({id:x.id}, x.data()))), err => { console.error('threads', err); if (onErr) onErr(err); }); },
+    async setChatReq(id, data){ await setDoc(doc(db,'chatReqs',id), data, {merge:true}); },
+    async delChatReq(id){ await deleteDoc(doc(db,'chatReqs',id)); },
+    onChatReqs(uid, cb, onErr){ return onSnapshot(query(collection(db,'chatReqs'), where('users','array-contains',uid)), snap => cb(snap.docs.map(x => Object.assign({}, x.data(), {id:x.id}))), err => { console.error('chatReqs', err); if (onErr) onErr(err); }); },
     async setMovie(id, m){ await setDoc(doc(db,'movies',id), m); },
     onMovies(cb){ return onSnapshot(collection(db,'movies'), snap => cb(snap.docs.map(d => d.data()))); },
     async sendMsg(chatId, msg){ await addDoc(collection(db,'chats',chatId,'messages'), msg); },
@@ -842,7 +848,7 @@ const S = {
   view:'landing', tab:'home', device:'mobile', uid:null, me:null, real:{},
   match:{stage:'pick', sel:[], genres:{}, recs:[], group:[]},
   chat:{with:null, msgs:[], unsub:null}, sheet:null, room:null, roomUnsub:null, q:{stage:1, picked:null, pts:0},
-  draft:{color:COLORS[0]}, threads:{}, prevUnread:{}, threadsReady:false, auth:{mode:'signup', err:'', busy:false}, unsubs:[], pendingRoom:null, pendingGroup:null, groups:[], gid:null, group:null, toast:null, bots:null,
+  draft:{color:COLORS[0]}, threads:{}, reqs:{}, prevUnread:{}, threadsReady:false, auth:{mode:'signup', err:'', busy:false}, unsubs:[], pendingRoom:null, pendingGroup:null, groups:[], gid:null, group:null, toast:null, bots:null,
 };
 
 const DEMO = /[?&]demo\b/.test(location.search);   // ?demo suma usuarios de ejemplo para probar a solas
@@ -858,10 +864,23 @@ const stars = n => { const f = Math.floor(n), h = n - f >= .5 ? 1 : 0; return '�
 const chatId = (a,b) => [a,b].sort().join('|');
 const logo = (big) => `<span class="logo ${big?'big':''}">GPD<b>2</b></span>`;
 const unreadOf = t => (t && t.unread && S.uid && t.unread[S.uid]) || 0;
+const REQ_MAX_DAY = 10;   // máximo de solicitudes de chat que se pueden mandar por día (anti-spam)
+const reqOf = uid => S.reqs[chatId(S.uid, uid)] || null;
+const canChat = uid => { const u = U()[uid]; if (!u || !S.me || hidden(u)) return false; if (isMutual(S.me, u)) return true; const r = reqOf(uid); return !!r && r.status === 'accepted'; };
+const incomingChatReqs = () => Object.values(S.reqs).filter(r => r.to === S.uid && r.status === 'pending' && U()[r.from] && !hidden(U()[r.from]));
+const chatBadge = () => unreadTotal() + incomingChatReqs().length;
+function chatBtn(u, cls){
+  cls = cls === undefined ? 'sm' : cls;
+  if (canChat(u.uid)) return `<button class="btn ${cls}" data-act="openChat" data-id="${u.uid}">💬 Chat</button>`;
+  const r = reqOf(u.uid);
+  if (r && r.from === S.uid) return `<button class="btn ghost ${cls}" disabled>⏳ Solicitud enviada</button>`;   // si la rechazó, no se le avisa
+  if (r && r.to === S.uid) return r.status === 'pending' ? `<button class="btn ${cls}" data-act="tab" data-id="chat">✉️ Responder solicitud</button>` : `<button class="btn ${cls}" data-act="acceptReq" data-id="${u.uid}">Aceptar solicitud</button>`;
+  return `<button class="btn ${cls}" data-act="reqChat" data-id="${u.uid}">✉️ Solicitar chat</button>`;
+}
 const unreadTotal = () => Object.values(S.threads).reduce((s, t) => s + unreadOf(t), 0);
 const otherOf = t => t.users.find(x => x !== S.uid);
 function updateBadge(){
-  const n = unreadTotal(); document.title = (n ? '(' + n + ') ' : '') + 'GPD 2';
+  const n = chatBadge(); document.title = (n ? '(' + n + ') ' : '') + 'GPD 2';
   const sp = document.querySelector('.tabbar [data-id=chat] span'); if (!sp) return;
   const old = sp.querySelector('.nbadge'); if (old) old.remove();
   if (n){ const b = document.createElement('i'); b.className = 'nbadge'; b.textContent = n; sp.appendChild(b); }
@@ -1065,16 +1084,22 @@ function ownTools(){
   const bl = (S.me.blocked||[]).map(userOf);
   return `${recoverCard()}<div class="sec" style="margin-top:26px">Privacidad y cuenta</div>
     ${bl.length ? `<div class="muted" style="margin-bottom:6px">Usuarios bloqueados</div><div class="people" style="margin-bottom:10px">${bl.map(u => `<div class="person">${av(u)}<b class="grow">@${esc(u.username||u.name)}</b><button class="btn sm ghost" data-act="unblock" data-id="${u.uid}">Desbloquear</button></div>`).join('')}</div>` : ''}
+    <div class="card" style="margin-bottom:12px"><div class="row" style="gap:10px"><div class="grow"><b>Aparecer como alma gemela</b><div class="muted">Si lo apagás, nadie te ve en su pestaña de almas gemelas.</div></div><button class="btn sm ${S.me.twinHidden ? 'ghost' : ''}" data-act="togPriv" data-id="twin">${S.me.twinHidden ? 'Apagado' : 'Activado'}</button></div>
+      <div class="row" style="gap:10px;margin-top:12px"><div class="grow"><b>Recibir solicitudes de chat de desconocidos</b><div class="muted">Tus amigos siempre pueden escribirte. Si lo apagás, solo ellos.</div></div><button class="btn sm ${S.me.noStrangerChat ? 'ghost' : ''}" data-act="togPriv" data-id="reqs">${S.me.noStrangerChat ? 'Apagado' : 'Activado'}</button></div></div>
     <div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn ghost sm" data-act="openLegal">Términos y privacidad</button><button class="btn ghost sm" data-act="tutOpen">Ver tutorial</button><button class="btn ghost sm" style="color:#ff7a7a" data-act="askDelete">Eliminar mi cuenta</button></div>`;
 }
 function profileView(uid){
   const mine = uid === S.uid, u = mine ? S.me : userOf(uid);
-  if (!u || (!mine && !isMutual(S.me, u))) return `<button class="back" data-act="profBack">← Volver</button><div class="card muted">Solo podés ver el perfil de tus amigos confirmados.</div>`;
+  const stranger = !mine && !!u && !isMutual(S.me, u);
+  const mayView = mine || (!!u && !hidden(u) && (!stranger || !!reqOf(uid) || twins(S.me, allOthers()).some(t => t.user.uid === uid) || incomingRequests(S.me, allOthers()).some(x => x.uid === uid)));
+  if (!u || !mayView) return `<button class="back" data-act="profBack">← Volver</button><div class="card muted">No podés ver este perfil. Solo se ven los perfiles de tus amigos, de tus almas gemelas y de quienes te mandaron una solicitud.</div>`;
   const list = rated(u).map(id => MOVIE[id]).filter(Boolean).sort((x,y) => (u.ratings[y.id]-u.ratings[x.id]) || x.title.localeCompare(y.title));
   const n = Math.min(S.profN || PROF_STEP, list.length), s = mine ? null : similarity(S.me, u);
   return `<button class="back" data-act="profBack">← Volver</button>
     <div class="row" style="margin:6px 0 14px">${av(u,'lg')}<div class="grow"><h1 style="margin:0">${esc(u.name)}</h1><div class="muted">@${esc(u.username||u.name)} · ${list.length} películas rankeadas${s?` · ${Math.round(s.sim*100)}% afinidad`:''}</div></div>
-      ${mine ? '' : `<button class="btn sm" data-act="openChat" data-id="${u.uid}">💬 Chat</button>`}</div>
+      ${mine || stranger ? '' : chatBtn(u)}</div>
+    ${stranger ? `<div class="notice" style="margin-bottom:12px">👀 No son amigos todavía. Ves su top 4 y las películas que rankeó; sus reseñas y datos personales son privados. Podés mandarle una solicitud de chat: solo hablan si la acepta.</div>
+      <div class="row" style="gap:8px;margin-bottom:14px;flex-wrap:wrap">${chatBtn(u)}${(S.me.friends||[]).includes(u.uid) ? '<button class="btn ghost sm" disabled>⏳ Amistad pendiente</button>' : `<button class="btn ghost sm" data-act="follow" data-id="${u.uid}">Agregar amigo</button>`}</div>` : ''}
     <div class="sec">Top 4 favoritas ${mine ? '<span style="text-transform:none;letter-spacing:0">(tocá para elegir o cambiar)</span>' : ''}</div>
     ${topSlots(u, mine)}
     ${!mine && !(u.top4||[]).length ? `<div class="muted" style="margin:-4px 0 10px">Todavía no eligió su top 4.</div>` : ''}
@@ -1104,11 +1129,11 @@ function appView(){
   else if (S.tab === 'home') body = homeTab();
   else if (S.tab === 'friends') body = friendsTab();
   else if (S.tab === 'match') body = matchTab();
-  else if (S.tab === 'twin') body = twinTab();
+  else if (S.tab === 'twin') body = (S.notice ? `<div class="notice">✅ ${esc(S.notice)}</div>` : '') + twinTab();
   else if (S.tab === 'chat') body = chatTab();
   return `<div class="head">${logo()}<div class="chip ${S.tut!=null && TUT[S.tut] && TUT[S.tut].chip?'spot':''}" data-act="profile" data-id="${S.uid}" style="cursor:pointer">${esc(S.me.name)} ${av(S.me,'sm')}<button class="btn sm ghost" data-act="logout">Salir</button></div></div>
     <div class="main">${body}</div>${S.pick != null ? pickView() : ''}
-    <div class="tabbar">${tabs.map(t => `<button data-act="tab" data-id="${t[0]}" class="${S.tab===t[0]?'on':''} ${S.tut!=null && TUT[S.tut] && TUT[S.tut].tab===t[0]?'spot':''}"><span>${t[1]}${t[0]==='chat' && unreadTotal() ? `<i class="nbadge">${unreadTotal()}</i>` : ''}</span>${t[2]}</button>`).join('')}</div>`;
+    <div class="tabbar">${tabs.map(t => `<button data-act="tab" data-id="${t[0]}" class="${S.tab===t[0]?'on':''} ${S.tut!=null && TUT[S.tut] && TUT[S.tut].tab===t[0]?'spot':''}"><span>${t[1]}${t[0]==='chat' && chatBadge() ? `<i class="nbadge">${chatBadge()}</i>` : ''}</span>${t[2]}</button>`).join('')}</div>`;
 }
 
 function homeTab(){
@@ -1246,10 +1271,10 @@ function twinTab(){
       <div class="sec" style="margin-top:14px">Rankearon parecido</div>
       ${t.s.common.slice(0,3).map(id => `<div class="muted" style="margin-bottom:3px">${esc(MOVIE[id].title)} — vos ${stars(S.me.ratings[id])} · ${esc(u.name)} ${stars(u.ratings[id])}</div>`).join('')}
       ${recs.length ? `<div class="sec">Podrían interesarte</div><div class="grid" style="grid-template-columns:repeat(4,1fr)">${recs.slice(0,4).map(m => `<div>${poster(m.id)}<div class="cap">${esc(m.title)}</div></div>`).join('')}</div>` : ''}
-      <div style="margin-top:14px;display:flex;gap:8px"><button class="btn" data-act="openChat" data-id="${u.uid}">💬 Hablar</button><button class="btn ghost" data-act="follow" data-id="${u.uid}">Agregar amigo</button></div></div>`;
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="profile" data-id="${u.uid}">👤 Ver perfil</button>${chatBtn(u, '')}${(S.me.friends||[]).includes(u.uid) ? '<button class="btn ghost" disabled>⏳ Amistad pendiente</button>' : `<button class="btn ghost" data-act="follow" data-id="${u.uid}">Agregar amigo</button>`}</div></div>`;
   };
   return `<h1>Tu alma gemela de películas</h1><p class="sub">Personas que no son tus amigos pero rankean como vos.</p>
-    <div class="cols"><div>${card(list[0], true)}</div><div>${list.slice(1,4).length ? '<div class="sec" style="margin-top:0">Otros parecidos</div>' + list.slice(1,4).map(t => `<div class="person" style="margin-bottom:8px">${av(t.user)}<div class="grow"><b>${esc(t.user.name)}</b></div><div class="pct" style="font-size:16px">${Math.round(t.s.sim*100)}%</div><button class="btn sm ghost" data-act="openChat" data-id="${t.user.uid}">Hablar</button></div>`).join('') : ''}</div></div>`;
+    <div class="cols"><div>${card(list[0], true)}</div><div>${list.slice(1,4).length ? '<div class="sec" style="margin-top:0">Otros parecidos</div>' + list.slice(1,4).map(t => `<div class="person" style="margin-bottom:8px">${av(t.user)}<div class="grow"><b>${esc(t.user.name)}</b></div><div class="pct" style="font-size:16px">${Math.round(t.s.sim*100)}%</div><button class="btn sm ghost" data-act="profile" data-id="${t.user.uid}">Perfil</button>${chatBtn(t.user)}</div>`).join('') : ''}</div></div>`;
 }
 
 function chatTab(){
@@ -1260,18 +1285,24 @@ function chatTab(){
       <div class="row" style="margin-bottom:8px">${av(o)}<h2 style="margin:0" class="grow">${esc(o.name)}</h2><button class="btn sm ghost" data-act="askReport" data-id="${o.uid}">🚩 Reportar</button><button class="btn sm ghost" data-act="askBlock" data-id="${o.uid}">🚫 Bloquear</button></div>
       ${ban ? `<div class="banner">${esc(ban)}</div>` : ''}
       <div class="msgs" id="msgs">${msgsHTML()}</div>
-      <div class="send"><input class="inp" id="msgin" placeholder="Escribí un mensaje…" autocomplete="off"><button class="btn" data-act="send">Enviar</button></div></div>`;
+      ${canChat(C.with) ? `<div class="send"><input class="inp" id="msgin" placeholder="Escribí un mensaje…" autocomplete="off"><button class="btn" data-act="send">Enviar</button></div>` : `<div class="notice">Ya no podés escribirle a esta persona.</div>`}</div>`;
   }
-  const ids = [...new Set([...myFriends(), ...(S.me.contacts||[]), ...Object.values(S.threads).map(otherOf)])].filter(id => U()[id] && !hidden(U()[id]));
+  const ids = [...new Set([...myFriends(), ...Object.values(S.reqs).filter(r => r.status === 'accepted').map(r => r.from === S.uid ? r.to : r.from), ...Object.values(S.threads).map(otherOf)])].filter(id => canChat(id));
+  const inc = incomingChatReqs();
+  const reqHTML = inc.length ? `<div class="sec">Solicitudes de chat (${inc.length})</div>${inc.map(r => { const u = userOf(r.from), s = similarity(S.me, u);
+    return `<div class="card" style="margin-bottom:10px"><div class="row">${av(u)}<div class="grow"><b>@${esc(u.username || u.name)}</b><div class="muted">quiere chatear con vos${s ? ` · ${Math.round(s.sim*100)}% de afinidad` : ''}</div></div></div>
+      <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn sm" data-act="acceptReq" data-id="${u.uid}">Aceptar</button><button class="btn sm ghost" data-act="declineReq" data-id="${u.uid}">Rechazar</button><button class="btn sm ghost" data-act="profile" data-id="${u.uid}">👤 Ver perfil</button></div>
+      <div class="muted" style="margin-top:8px;font-size:12px">No se habla hasta que aceptes. Si rechazás, no se le avisa y no podrá escribirte. También podés reportarla o bloquearla desde su perfil.</div></div>`; }).join('')}` : '';
   const rows = ids.map(id => ({id, u:userOf(id), t:S.threads[chatId(S.uid, id)]}))
     .sort((p, q) => unreadOf(q.t) - unreadOf(p.t) || ((q.t && q.t.lastTs) || 0) - ((p.t && p.t.lastTs) || 0));
   const total = unreadTotal(), people = rows.filter(r => unreadOf(r.t) > 0).length;
   return `<h1>Chats</h1>
+    ${reqHTML}
     ${total ? `<div class="banner" style="font-size:14px">💬 Tenés <b>${total}</b> ${total === 1 ? 'mensaje pendiente' : 'mensajes pendientes'} de <b>${people}</b> ${people === 1 ? 'persona' : 'personas'}.</div>` : '<p class="sub">Tus amigos y las personas con las que hablaste. No tenés mensajes pendientes.</p>'}
     <div class="people">${rows.length ? rows.map(r => { const n = unreadOf(r.t), isFriend = myFriends().includes(r.id);
       const prev = r.t && r.t.lastText ? `${r.t.lastFrom === S.uid ? 'Vos: ' : ''}${isProfane(r.t.lastText) ? '🙈 Mensaje oculto' : esc(r.t.lastText)}` : (isFriend ? 'Amigo' : 'Alma gemela');
       return `<div class="person ${n ? 'unread' : ''}" data-act="openChat" data-id="${r.id}">${av(r.u)}<div class="grow"><b>@${esc(r.u.username || r.u.name)}</b><div class="muted" style="${n ? 'color:#fff;font-weight:600;' : ''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${prev}</div></div>${n ? `<span class="count">${n}</span>` : ''}</div>`; }).join('')
-      : '<div class="card muted">Todavía no tenés conversaciones. Agregá amigos en la pestaña Amigos (con el botón 💬 podés chatear con cada uno) o hablale a tu alma gemela.</div>'}</div>`;
+      : '<div class="card muted">Todavía no tenés conversaciones. Podés chatear con tus amigos, o mandarle una solicitud de chat a tu alma gemela (solo hablan si la acepta).</div>'}</div>`;
 }
 const msgsHTML = () => S.chat.msgs.map(m => { const k = m.ts + '|' + m.from, bad = isProfane(m.text) && !(S.rev && S.rev.has(k)); return `<div class="bub ${m.from===S.uid?'me':''} ${bad?'bad':''}" ${bad?`data-act="reveal" data-k="${esc(k)}"`:''}><span class="bt">${esc(m.text)}</span></div>`; }).join('');
 
@@ -1357,6 +1388,8 @@ async function startSession(){
   });
   S.threads = {}; S.prevUnread = {}; S.threadsReady = false;
   S.unsubs.push(DB.onThreads(S.uid, onThreads, err => { if (!S.threadsWarned){ S.threadsWarned = true; toast('No se pueden leer los mensajes pendientes (' + (err.code || err.message) + '). Falta publicar las reglas nuevas de Firestore.'); } }));
+  S.reqs = {}; S.reqsReady = false;
+  S.unsubs.push(DB.onChatReqs(S.uid, onChatReqs, err => { if (!S.reqsWarned){ S.reqsWarned = true; toast('No se pueden leer las solicitudes de chat (' + (err.code || err.message) + '). Falta publicar las reglas nuevas de Firestore.'); } }));
   S.groups = [];
   S.unsubs.push(DB.onGroups(S.uid, list => {
     const known = new Set((S.groups||[]).map(g => g.id));
@@ -1400,8 +1433,19 @@ function teardown(){
   S.unsubs.forEach(f => { try { f(); } catch(_){} }); S.unsubs = [];
 }
 function resetState(){
-  S.threads = {}; S.prevUnread = {}; S.threadsReady = false; S.uid = null; S.resume = null; S.me = null; S.real = {}; S.room = null; S.chat.with = null; S.freshSignup = false; S.gridQ = ''; S.tut = null; S.notice = ''; S.prof = null; S.pick = null;
+  S.threads = {}; S.reqs = {}; S.reqsReady = false; S.prevUnread = {}; S.threadsReady = false; S.uid = null; S.resume = null; S.me = null; S.real = {}; S.room = null; S.chat.with = null; S.freshSignup = false; S.gridQ = ''; S.tut = null; S.notice = ''; S.prof = null; S.pick = null;
   S.match = {stage:'pick', sel:[], genres:{}, recs:[], group:[], shown:5, gname:''}; S.gid = null; S.group = null; S.groups = []; if (S.groupUnsub){ S.groupUnsub(); S.groupUnsub = null; }
+}
+function onChatReqs(list){
+  const prev = S.reqs; S.reqs = Object.fromEntries(list.map(r => [r.id, r]));
+  if (S.reqsReady) list.forEach(r => {
+    const was = prev[r.id], nm = () => '@' + ((userOf(r.from === S.uid ? r.to : r.from) || {}).username || 'alguien');
+    if (r.to === S.uid && r.status === 'pending' && !was) toast('✉️ ' + nm() + ' quiere chatear con vos. Mirá la pestaña Chats.');
+    if (r.from === S.uid && r.status === 'accepted' && was && was.status !== 'accepted') toast('✅ ' + nm() + ' aceptó tu solicitud de chat');
+  });
+  else if (incomingChatReqs().length) toast('✉️ Tenés ' + incomingChatReqs().length + ' solicitud' + (incomingChatReqs().length > 1 ? 'es' : '') + ' de chat');
+  S.reqsReady = true; updateBadge();
+  if (S.view === 'app' && !(S.tab === 'chat' && S.chat.with)) softRender();
 }
 function onThreads(list){
   S.threads = Object.fromEntries(list.map(t => [t.id, t]));
@@ -1525,10 +1569,10 @@ function leaveRoom(){
 
 async function openChat(uid){
   const C = S.chat;
+  if (!canChat(uid)){ toast('Para hablar con esta persona primero tenés que mandarle una solicitud de chat.'); return; }
   if (C.unsub) C.unsub();
   C.with = uid; C.msgs = []; S.tab = 'chat'; S.view = 'app';
   DB.markRead(chatId(S.uid, uid), S.uid).catch(() => {});
-  if (!myFriends().includes(uid) && !(S.me.contacts||[]).includes(uid)) await saveMe({contacts:[...(S.me.contacts||[]), uid]});
   render();
   C.unsub = DB.onMsgs(chatId(S.uid, uid), msgs => {
     C.msgs = msgs; const el = $('#msgs'); if (el){ el.innerHTML = msgsHTML(); el.scrollTop = el.scrollHeight; }
@@ -1539,7 +1583,7 @@ async function openChat(uid){
 async function sendMsg(){
   const inp = $('#msgin'); const text = inp.value.trim(); if (!text) return; inp.value = '';
   const other = S.chat.with, cid = chatId(S.uid, other);
-  if (hidden(userOf(other))){ toast('No podés enviar mensajes a este usuario.'); return; }
+  if (!canChat(other)){ toast('No podés enviar mensajes a este usuario.'); return; }
   try { await DB.sendMsg(cid, {from:S.uid, text, ts:Date.now()}); }
   catch(e){ toast('No se pudo enviar: ' + (e.code || e.message)); const i2 = $('#msgin'); if (i2) i2.value = text; return; }
   DB.touchThread(cid, S.uid, other, text).catch(e => console.warn('thread', e));
@@ -1629,12 +1673,35 @@ document.addEventListener('click', async e => {
     case 'rate': { const r = (S.me.ratings||{})[id] || 0; S.sheet = {id, stars:r, text:(S.me.reviews||{})[id] || ''}; render(); break; }
     case 'star': { const ta = $('#rtext'); S.sheet.text = ta ? ta.value : S.sheet.text; S.sheet.stars = +id; render(); break; }
     case 'askReport': S.report = {uid:id, reason:'', text:''}; render(); break;
+    case 'togPriv': { if (id === 'twin') await saveMe({twinHidden:!S.me.twinHidden}); else await saveMe({noStrangerChat:!S.me.noStrangerChat}); render(); toast('Preferencia guardada'); break; }
+    case 'reqChat': {
+      const u = userOf(id); if (!u || hidden(u)) break;
+      if (canChat(id)){ openChat(id); break; }
+      if (reqOf(id)){ toast('Ya hay una solicitud de chat con esta persona.'); break; }
+      if (u.noStrangerChat && !u.demo){ toast('Esta persona no recibe solicitudes de chat de desconocidos.'); break; }
+      const sentToday = Object.values(S.reqs).filter(r => r.from === S.uid && Date.now() - (r.ts||0) < 864e5).length;
+      if (sentToday >= REQ_MAX_DAY){ toast('Mandaste muchas solicitudes hoy. Probá de nuevo mañana.'); break; }
+      const rid = chatId(S.uid, id);
+      try { await DB.setChatReq(rid, {from:S.uid, to:id, users:[S.uid, id], status:'pending', ts:Date.now()}); }
+      catch(e){ toast('No se pudo enviar la solicitud (' + (e.code || e.message) + ')'); break; }
+      S.notice = `Solicitud de chat enviada a @${u.username || u.name}. Solo van a poder hablar si la acepta.`;
+      clearTimeout(S.noticeT); S.noticeT = setTimeout(() => { S.notice = ''; if (S.view === 'app') softRender(); }, 8000);
+      render(); toast('✉️ Solicitud de chat enviada. Si la acepta, van a poder hablar.');
+      if (u.demo) setTimeout(() => DB.setChatReq(rid, {status:'accepted', ts:Date.now()}).catch(() => {}), 1500);
+      break; }
+    case 'acceptReq': { const r = reqOf(id); if (!r || r.to !== S.uid) break;
+      try { await DB.setChatReq(chatId(S.uid, id), {status:'accepted', ts:Date.now()}); } catch(e){ toast('No se pudo aceptar (' + (e.code || e.message) + ')'); break; }
+      S.prof = null; toast('✅ Aceptaste la solicitud. Ya pueden chatear.'); setTimeout(() => { if (canChat(id)) openChat(id); else render(); }, 400); break; }
+    case 'declineReq': { const r = reqOf(id); if (!r || r.to !== S.uid) break;
+      try { await DB.setChatReq(chatId(S.uid, id), {status:'declined', ts:Date.now()}); } catch(e){ toast('No se pudo rechazar (' + (e.code || e.message) + ')'); break; }
+      toast('Solicitud rechazada. No se le avisó a la otra persona.'); render(); break; }
     case 'askBlock': S.confirm = {type:'block', uid:id}; render(); break;
     case 'repReason': { const ta = $('#reptext'); if (ta) S.report.text = ta.value; S.report.reason = id; render(); break; }
     case 'sendReport': { const R = S.report, ta = $('#reptext'); const rep = {by:S.uid, target:R.uid, reason:R.reason, text:(ta ? ta.value : R.text || '').slice(0,300), ts:Date.now()};
       try { await DB.report(rep); toast('✅ Reporte enviado. ¡Gracias por cuidar la comunidad!'); } catch(e){ toast('No se pudo enviar el reporte (' + (e.code || e.message) + ')'); } S.report = null; render(); break; }
     case 'doBlock': { const bl = [...new Set([...(S.me.blocked||[]), id])]; S.confirm = null; S.match.sel = S.match.sel.filter(x => x !== id);
       if (S.chat.with === id){ if (S.chat.unsub){ S.chat.unsub(); S.chat.unsub = null; } S.chat.with = null; } if (S.prof === id) S.prof = null;
+      { const r = reqOf(id); if (r) DB.delChatReq(r.id).catch(() => {}); }
       await saveMe({blocked:bl, friends:(S.me.friends||[]).filter(x => x !== id), contacts:(S.me.contacts||[]).filter(x => x !== id)}); render(); toast('🚫 Usuario bloqueado'); break; }
     case 'unblock': await saveMe({blocked:(S.me.blocked||[]).filter(x => x !== id)}); render(); toast('Usuario desbloqueado'); break;
     case 'recoverData': { const o = S.real[id]; if (!o) break;
