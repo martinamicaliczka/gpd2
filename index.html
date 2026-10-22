@@ -1245,6 +1245,7 @@ function matchResults(){
   const done = n >= M.recs.length;
   return `<button class="back" data-act="matchReset">← Volver al grupo</button>
     <div class="row"><div class="avs">${M.group.map(u => av(u,'sm')).join('')}</div><h2 class="grow">Para ver juntos</h2></div>
+    <div class="muted" style="margin:-4px 0 10px;font-size:12px">Calculado con los gustos de ${M.group.length} persona${M.group.length===1?'':'s'}: ${M.group.map(u => esc(u.uid===S.uid ? 'vos' : u.name)).join(', ')} · versión 3</div>
     <p class="sub">El % es la afinidad con el grupo: qué tanto les gusta la categoría y la nota que esperamos que le pongan. Primero van las que nadie vio. Solo mostramos las que tienen buena afinidad (${MIN_PCT}% o más).</p>
     ${n ? `<div class="recs">${list}</div>
       <div style="text-align:center;margin:14px 0">${!done ? `<button class="btn block" data-act="moreRecs">Ver 5 más</button>` : '<div class="muted">🎬 Ya te mostramos todas las que tienen buena afinidad con el grupo. Rankeen más películas para afinar las recomendaciones.</div>'}</div>`
