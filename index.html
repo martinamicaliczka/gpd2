@@ -195,12 +195,10 @@ body{display:block;padding:0;background:var(--dark);min-height:100dvh}
 .agebox{display:flex;gap:10px;align-items:flex-start;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:12.5px;line-height:1.4;color:#dfe6ec;cursor:pointer}
 .agebox input{margin-top:3px;width:18px;height:18px;flex-shrink:0;accent-color:var(--orange)}
 
-.bub.bad,.review.bad{cursor:pointer;position:relative;user-select:none}
-.bub.bad .bt,.review.bad .bt{filter:blur(6px);display:block}
-.bub.bad::after,.review.bad::after{content:'⚠️ Lenguaje inapropiado · tocá para ver';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font:700 10.5px Inter;color:#fff;text-shadow:0 0 4px #000,0 0 4px #000;border-radius:inherit;padding:0 6px}
-
-.overlay.modal{z-index:96}.sheet.legal{max-height:86%;display:flex;flex-direction:column}.legal-body{overflow:auto;font-size:13px;line-height:1.5;color:#dfe6ec;padding-right:4px}.legal-body h3{font-size:14px;margin:14px 0 4px;color:#fff}.legal-body p{margin:0}
-.agebox .lnk{color:var(--green);text-decoration:underline}
+.bub.bad,.review.bad{cursor:pointer;user-select:none}
+.bub.bad{width:min(88%,290px);text-align:center;align-self:flex-start}.bub.me.bad{align-self:flex-end}
+.bub.bad .bt,.review.bad .bt{display:none}
+.bub.bad::before,.review.bad::before{content:'⚠️ Lenguaje inapropiado · tocá para ver';display:block;font:600 12px/1.3 Inter;text-align:center;opacity:.9}
 </style></head>
 <body>
 <div class="stage"><div class="frame mobile" id="frame"><div style="color:#9ab;font:14px Inter,sans-serif;padding:40px;text-align:center">Cargando…</div></div></div>
@@ -929,12 +927,12 @@ function render(){
 }
 const TUT = [
   {ic:'🎬', t:'¡Bienvenido a GPD 2!', d:'Acá elegís qué ver con tus amigos. Te mostramos las 6 secciones en un minuto.'},
-  {tab:'home', t:'1 · Inicio', d:'Tus novedades y todas las películas.', todo:'Tocá una portada, ponele estrellas y guardá. Si usás Letterboxd, tocá "Importar" para traer tus calificaciones.'},
+  {tab:'home', t:'1 · Inicio', d:'Tus novedades y todas las películas.', todo:'Tocá una portada, ponele estrellas y guardá. Cuantas más rankees, mejores recomendaciones.'},
   {tab:'friends', t:'2 · Amigos', d:'Todo lo social arranca acá.', todo:'Escribí el @usuario de un amigo y tocá "Agregar". Cuando te acepte, pueden chatear y ver el perfil del otro.'},
   {tab:'match', t:'3 · Grupos y trivias 🎮', d:'Las trivias están en esta pestaña.', todo:'Tocá "Crear grupo" (invitá amigos o mandá el enlace). Adentro del grupo vas a ver "Buscar película" y los dos juegos de trivia con el botón "Jugar".'},
   {tab:'twin', t:'4 · Alma gemela', d:'La persona que puntúa más parecido a vos.', todo:'Aparece sola cuando hay alguien compatible. Si no ves a nadie, rankeá más películas.'},
   {tab:'chat', t:'5 · Chats', d:'Hablá con tus amigos.', todo:'Un globito naranja te avisa cuando tenés mensajes sin leer y de quién son.'},
-  {chip:1, t:'6 · Tu perfil', d:'Tocá tu nombre, arriba a la derecha.', todo:'Ahí elegís tu top 4, importás Letterboxd, ves a quién bloqueaste y podés eliminar tu cuenta.'},
+  {chip:1, t:'6 · Tu perfil', d:'Tocá tu nombre, arriba a la derecha.', todo:'Ahí elegís tu top 4, ves a quién bloqueaste y podés eliminar tu cuenta.'},
 ];
 function tutView(){
   const i = S.tut, s = TUT[i], last = i === TUT.length - 1, first = i === 0;
@@ -1079,7 +1077,6 @@ function profileView(uid){
       ${mine ? '' : `<button class="btn sm" data-act="openChat" data-id="${u.uid}">💬 Chat</button>`}</div>
     <div class="sec">Top 4 favoritas ${mine ? '<span style="text-transform:none;letter-spacing:0">(tocá para elegir o cambiar)</span>' : ''}</div>
     ${topSlots(u, mine)}
-    ${mine ? importBox() : ''}
     ${!mine && !(u.top4||[]).length ? `<div class="muted" style="margin:-4px 0 10px">Todavía no eligió su top 4.</div>` : ''}
     <div class="sec">${mine ? 'Tus películas' : 'Películas que rankeó'} (${list.length})</div>
     ${list.length ? `<div class="grid">${list.slice(0,n).map(m => `<div><div class="poster" style="background-image:url(${posterURL(m.id)});cursor:default"><div class="stars">${stars(u.ratings[m.id])}</div></div><div class="cap">${esc(m.title)}</div></div>`).join('')}</div>
@@ -1125,7 +1122,6 @@ function homeTab(){
       <div class="card"><h2>${fr.length}</h2><div class="muted">amigos</div></div>
       <div class="card"><h2>${tw ? Math.round(tw.s.sim*100)+'%' : '—'}</h2><div class="muted">afinidad con tu alma gemela</div></div></div>
     <div class="card" style="margin:10px 0"><div class="row"><div class="grow"><h3 style="margin:0">🎮 Trivias con amigos</h3><p class="sub" style="margin:4px 0 0">Entrá a <b style="color:#fff">Grupos y trivias</b>, creá un grupo y jueguen mientras eligen qué ver.</p></div><button class="btn sm" data-act="tab" data-id="match">Jugar</button></div></div>
-    <div class="card" style="margin:10px 0"><div class="row"><div class="grow"><h3 style="margin:0">📥 ¿Usás Letterboxd?</h3><p class="sub" style="margin:4px 0 0">Traé tus calificaciones y no empieces de cero.</p></div><button class="btn sm" data-act="profile" data-id="${S.uid}">Importar</button></div></div>
     <div class="sec">Novedades de tus amigos</div>
     ${feed.length ? `<div class="feed">${feed.map(a => `<div class="fitem">${poster(a.movie.id)}<div class="cap"><b style="color:#fff">${esc(a.user.name)}</b> · <span style="color:var(--green)">${stars(a.stars)}</span><br>${esc(a.movie.title)}${a.ts ? `<br><span style="color:var(--low)">hace ${ago(a.ts)}</span>` : ''}</div></div>`).join('')}</div>`
       : `<div class="card muted">Todavía no hay novedades. <button class="lnk" data-act="tab" data-id="friends">Buscá a tus amigos por nombre de usuario</button>.</div>`}
@@ -1277,7 +1273,7 @@ function chatTab(){
       return `<div class="person ${n ? 'unread' : ''}" data-act="openChat" data-id="${r.id}">${av(r.u)}<div class="grow"><b>@${esc(r.u.username || r.u.name)}</b><div class="muted" style="${n ? 'color:#fff;font-weight:600;' : ''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${prev}</div></div>${n ? `<span class="count">${n}</span>` : ''}</div>`; }).join('')
       : '<div class="card muted">Todavía no tenés conversaciones. Agregá amigos en la pestaña Amigos (con el botón 💬 podés chatear con cada uno) o hablale a tu alma gemela.</div>'}</div>`;
 }
-const msgsHTML = () => S.chat.msgs.map(m => `<div class="bub ${m.from===S.uid?'me':''} ${isProfane(m.text)?'bad':''}" ${isProfane(m.text)?'data-act="reveal" title="Mensaje con lenguaje inapropiado. Tocá para verlo"':''}><span class="bt">${esc(m.text)}</span></div>`).join('');
+const msgsHTML = () => S.chat.msgs.map(m => { const k = m.ts + '|' + m.from, bad = isProfane(m.text) && !(S.rev && S.rev.has(k)); return `<div class="bub ${m.from===S.uid?'me':''} ${bad?'bad':''}" ${bad?`data-act="reveal" data-k="${esc(k)}"`:''}><span class="bt">${esc(m.text)}</span></div>`; }).join('');
 
 /* ---------- Hoja de rating ---------- */
 function sheetView(){
@@ -1313,7 +1309,7 @@ function questionHTML(q, r){
   const revealed = Q.picked !== null;
   if (q.type === 'review'){
     return `<div class="row">${poster(q.movie)}<div><b>${esc(m.title)}</b><div class="muted">${m.year}</div></div></div>
-      <div class="review ${isProfane(q.text)?'bad':''}" ${isProfane(q.text)?'data-act="reveal"':''}><span class="bt">“${esc(q.text)}”</span></div>
+      <div class="review ${isProfane(q.text) && !(S.rev && S.rev.has('r:'+q.text))?'bad':''}" ${isProfane(q.text) && !(S.rev && S.rev.has('r:'+q.text))?`data-act="reveal" data-k="r:${esc(q.text)}"`:''}><span class="bt">“${esc(q.text)}”</span></div>
       ${q.options.map(uid => { const u = userOf(uid); let c = ''; if (revealed){ c = uid === q.author ? 'ok' : (uid === Q.picked ? 'bad' : 'dim'); } return `<button class="opt ${c}" data-act="pick" data-id="${uid}" ${revealed?'disabled':''}>${av(u,'sm')}${esc(u.name)}</button>`; }).join('')}
       ${revealed ? `<div class="hint">${Q.picked===q.author ? '¡Correcto! +2 puntos' : 'Era de ' + esc(userOf(q.author).name) + '.'}</div><button class="btn block" data-act="nextQ">Siguiente</button>` : ''}`;
   }
@@ -1622,7 +1618,7 @@ document.addEventListener('click', async e => {
   const act = t.dataset.act, id = t.dataset.id;
   switch (act){
     case 'ageToggle': S.auth.age = t.checked; break;
-    case 'reveal': t.classList.remove('bad'); t.removeAttribute('data-act'); break;
+    case 'reveal': (S.rev = S.rev || new Set()).add(t.dataset.k); t.classList.remove('bad'); t.removeAttribute('data-act'); break;
     case 'color': { const u = $('#au').value, p = $('#ap').value; S.draft.color = id; render(); $('#au').value = u; $('#ap').value = p; break; }
     case 'goAuth': S.auth = {mode:id, err:'', busy:false, u:(S.auth&&S.auth.u)||''}; S.view = 'auth'; render(); break;
     case 'goLanding': S.view = 'landing'; render(); break;
