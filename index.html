@@ -198,6 +198,9 @@ body{display:block;padding:0;background:var(--dark);min-height:100dvh}
 .bub.bad,.review.bad{cursor:pointer;position:relative;user-select:none}
 .bub.bad .bt,.review.bad .bt{filter:blur(6px);display:block}
 .bub.bad::after,.review.bad::after{content:'⚠️ Lenguaje inapropiado · tocá para ver';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font:700 10.5px Inter;color:#fff;text-shadow:0 0 4px #000,0 0 4px #000;border-radius:inherit;padding:0 6px}
+
+.overlay.modal{z-index:96}.sheet.legal{max-height:86%;display:flex;flex-direction:column}.legal-body{overflow:auto;font-size:13px;line-height:1.5;color:#dfe6ec;padding-right:4px}.legal-body h3{font-size:14px;margin:14px 0 4px;color:#fff}.legal-body p{margin:0}
+.agebox .lnk{color:var(--green);text-decoration:underline}
 </style></head>
 <body>
 <div class="stage"><div class="frame mobile" id="frame"><div style="color:#9ab;font:14px Inter,sans-serif;padding:40px;text-align:center">Cargando…</div></div></div>
@@ -685,7 +688,7 @@ function LocalDB(){
   const KEY = 'gpd2_v1';
   const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch(e){ return {}; } };
   const write = d => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e){} };
-  const base = () => { const d = read(); d.users = d.users||{}; d.chats = d.chats||{}; d.rooms = d.rooms||{}; d.movies = d.movies||{}; d.accounts = d.accounts||{}; d.threads = d.threads||{}; d.groups = d.groups||{}; return d; };
+  const base = () => { const d = read(); d.users = d.users||{}; d.chats = d.chats||{}; d.rooms = d.rooms||{}; d.movies = d.movies||{}; d.accounts = d.accounts||{}; d.threads = d.threads||{}; d.groups = d.groups||{}; d.reports = d.reports||[]; return d; };
   const listeners = new Set();
   const fire = () => listeners.forEach(f => f());
   window.addEventListener('storage', e => { if (e.key === KEY) fire(); });
@@ -721,6 +724,7 @@ function LocalDB(){
     onMovies(cb){ const f = () => cb(Object.values(base().movies)); listeners.add(f); f(); return () => listeners.delete(f); },
     async sendMsg(chatId, msg){ const d = base(); (d.chats[chatId] = d.chats[chatId] || []).push(msg); write(d); fire(); },
     onMsgs(chatId, cb){ const f = () => cb((base().chats[chatId]||[]).slice()); listeners.add(f); f(); return () => listeners.delete(f); },
+    async report(r){ const d = base(); d.reports.push(r); write(d); },
     async setGroup(id, g){ const d = base(); d.groups[id] = g; write(d); fire(); },
     async getGroup(id){ return base().groups[id] || null; },
     async updateGroup(id, patch){ const d = base(); const g = d.groups[id]; if(!g) return; for (const k in patch) setPath(g, k, patch[k]); write(d); fire(); },
@@ -762,7 +766,7 @@ async function FirebaseDB(cfg){
     async getUser(uid){ const s = await getDoc(doc(db,'users',uid)); return s.exists() ? s.data() : null; },
     async setUser(uid, data){ await setDoc(doc(db,'users',uid), data); },
     async updateUser(uid, patch){ await updateDoc(doc(db,'users',uid), patch); },
-    onUsers(cb, onErr){ return onSnapshot(collection(db,'users'), snap => cb(snap.docs.map(d => d.data())), err => { console.error('users', err); if (onErr) onErr(err); }); },
+    onUsers(cb, onErr){ return onSnapshot(collection(db,'users'), snap => { if (snap.metadata.fromCache && snap.empty) return; cb(snap.docs.map(d => d.data())); }, err => { console.error('users', err); if (onErr) onErr(err); }); },
     async touchThread(chatId, from, to, text){
       await setDoc(doc(db,'threads',chatId), {users:[from,to], lastText:text.slice(0,120), lastFrom:from, lastTs:Date.now(), unread:{[to]: increment(1)}}, {merge:true});
     },
@@ -772,6 +776,7 @@ async function FirebaseDB(cfg){
     onMovies(cb){ return onSnapshot(collection(db,'movies'), snap => cb(snap.docs.map(d => d.data()))); },
     async sendMsg(chatId, msg){ await addDoc(collection(db,'chats',chatId,'messages'), msg); },
     onMsgs(chatId, cb, onErr){ return onSnapshot(query(collection(db,'chats',chatId,'messages'), orderBy('ts')), snap => cb(snap.docs.map(d => d.data())), err => { console.error('chat', err); if (onErr) onErr(err); }); },
+    async report(r){ await addDoc(collection(db,'reports'), r); },
     async setGroup(id, g){ await setDoc(doc(db,'groups',id), g); },
     async getGroup(id){ const s = await getDoc(doc(db,'groups',id)); return s.exists() ? s.data() : null; },
     async updateGroup(id, patch){ await updateDoc(doc(db,'groups',id), patch); },
@@ -846,7 +851,8 @@ const DEMO = /[?&]demo\b/.test(location.search);   // ?demo suma usuarios de eje
 const posterURL = id => POSTERS[id] || (MOVIE[id] && MOVIE[id].poster) || '';
 const U = () => Object.assign(DEMO ? Object.fromEntries(DEMO_USERS.map(u => [u.uid,u])) : {}, S.real);
 const userOf = uid => U()[uid] || {uid, name:'Alguien', color:'#556', ratings:{}, reviews:{}, friends:[]};
-const allOthers = () => Object.values(U()).filter(u => u.uid !== S.uid);
+const hidden = u => !!S.me && ((S.me.blocked||[]).includes(u.uid) || (u.blocked||[]).includes(S.uid));   // bloqueo en cualquiera de los dos sentidos
+const allOthers = () => Object.values(U()).filter(u => u.uid !== S.uid && !hidden(u));
 const ratedCount = u => Object.values((u && u.ratings) || {}).filter(r => r > 0).length;   // cuenta las calificaciones aunque la película todavía no se haya cargado
 const poster = (id, cls='', attr='') => `<div class="poster ${cls}" ${attr} style="background-image:url(${posterURL(id)})"></div>`;
 const av = (u, cls='') => `<div class="av ${cls}" style="background:${u.color}">${esc((u.name||'?')[0].toUpperCase())}</div>`;
@@ -862,9 +868,40 @@ function updateBadge(){
   const old = sp.querySelector('.nbadge'); if (old) old.remove();
   if (n){ const b = document.createElement('i'); b.className = 'nbadge'; b.textContent = n; sp.appendChild(b); }
 }
-const myFriends = () => (S.me.friends||[]).filter(id => U()[id] && isMutual(S.me, U()[id]));
+const myFriends = () => (S.me.friends||[]).filter(id => U()[id] && !hidden(U()[id]) && isMutual(S.me, U()[id]));
 S.search = {q:'', res:[], busy:false, err:''};
 
+const REPORT_REASONS = ['Lenguaje ofensivo o acoso','Contenido inapropiado','Spam o cuenta falsa','Parece ser menor de 13 años','Otro motivo'];
+function modalView(){
+  if (S.legal) return legalView();
+  if (S.report){ const R = S.report, u = userOf(R.uid);
+    return `<div class="overlay modal" data-act="closeModal"><div class="sheet" data-stop="1"><h2>Reportar a @${esc(u.username||u.name)}</h2><p class="sub" style="margin:4px 0 10px">Tu reporte es confidencial. Lo revisa el equipo de GPD 2.</p>
+      ${REPORT_REASONS.map(r => `<button class="opt ${R.reason===r?'ok':''}" data-act="repReason" data-id="${esc(r)}">${esc(r)}</button>`).join('')}
+      <textarea id="reptext" maxlength="300" placeholder="Contanos qué pasó (opcional)">${esc(R.text||'')}</textarea>
+      <div class="row" style="margin-top:12px"><button class="btn ghost" data-act="closeModal">Cancelar</button><button class="btn grow" data-act="sendReport" ${R.reason?'':'disabled'}>Enviar reporte</button></div></div></div>`; }
+  if (S.confirm){ const C = S.confirm;
+    if (C.type === 'block'){ const u = userOf(C.uid);
+      return `<div class="overlay modal" data-act="closeModal"><div class="sheet" data-stop="1"><h2>¿Bloquear a @${esc(u.username||u.name)}?</h2><p class="sub" style="margin:6px 0 14px">Dejan de ser amigos y ninguno de los dos va a poder verse, buscarse ni escribirse. Podés desbloquearlo desde tu perfil.</p>
+        <div class="row"><button class="btn ghost grow" data-act="closeModal">Cancelar</button><button class="btn grow" style="background:#ff5a5a" data-act="doBlock" data-id="${u.uid}">Bloquear</button></div></div></div>`; }
+    if (C.type === 'delete')
+      return `<div class="overlay modal" data-act="closeModal"><div class="sheet" data-stop="1"><h2>Eliminar mi cuenta</h2><p class="sub" style="margin:6px 0 10px">Se borran tu perfil, tus calificaciones y tus amistades. <b style="color:#fff">No se puede deshacer.</b> Para confirmar escribí tu usuario: <b style="color:#fff">${esc(S.me.username||S.me.name)}</b></p>
+        <input class="inp" id="delconf" autocapitalize="none" placeholder="tu usuario" style="margin-bottom:12px">
+        <div class="row"><button class="btn ghost grow" data-act="closeModal">Cancelar</button><button class="btn grow" style="background:#ff5a5a" data-act="doDelete">Eliminar para siempre</button></div></div></div>`; }
+  return '';
+}
+function legalView(){
+  return `<div class="overlay modal" data-act="closeModal"><div class="sheet legal" data-stop="1"><h2>Términos y política de privacidad</h2>
+    <div class="legal-body">
+    <p class="muted" style="margin-top:0">Prototipo académico · GPD 2</p>
+    <h3>Qué datos guardamos</h3><p>Tu nombre de usuario, tu contraseña (la gestiona Firebase Authentication y nunca la vemos), tus calificaciones y reseñas, tus amigos, tus mensajes y tus grupos. Si importás un archivo de Letterboxd, se lee en tu navegador y solo se guardan tus calificaciones.</p>
+    <h3>Para qué los usamos</h3><p>Para recomendarte películas, armar grupos, mostrar tu perfil a tus amigos confirmados, calcular afinidades y permitir el chat y las trivias. No vendemos ni cedemos tus datos a terceros.</p>
+    <h3>Quién ve qué</h3><p>Tu perfil y tu top 4 los ven solo tus amigos confirmados. Tus reseñas se usan de forma anónima en las trivias. Los mensajes los ven solo quienes participan de la conversación.</p>
+    <h3>Edad mínima</h3><p>Hay que tener <b>13 años o más</b> para crear una cuenta. La edad se declara al registrarse. Si descubrimos una cuenta de una persona menor, la podemos eliminar.</p>
+    <h3>Convivencia</h3><p>No se permite el acoso, el lenguaje ofensivo, el spam ni hacerse pasar por otra persona. Podés <b>reportar</b> o <b>bloquear</b> a cualquier usuario desde su perfil o desde el chat. Los mensajes con lenguaje inapropiado se difuminan automáticamente.</p>
+    <h3>Tus derechos</h3><p>Podés ver, corregir o <b>eliminar tu cuenta y tus datos</b> cuando quieras desde tu perfil (“Eliminar mi cuenta”). La Ley 25.326 de Protección de Datos Personales de Argentina te da derecho de acceso, rectificación y supresión; el órgano de control es la Agencia de Acceso a la Información Pública.</p>
+    <h3>Datos de películas</h3><p>La información y los pósters provienen de TMDB. Este producto usa la API de TMDB pero no está avalado ni certificado por TMDB. GPD 2 no está afiliado a Letterboxd.</p>
+    </div><button class="btn block" data-act="closeModal" style="margin-top:12px">Entendido</button></div></div>`;
+}
 function toast(msg){
   const f = $('#frame'); if (!f) return;
   clearTimeout(toast.t); const old = f.querySelector('.toast'); if (old) old.remove();
@@ -882,6 +919,7 @@ function render(){
   else if (S.view === 'room') html = roomShell();
   else html = appView();
   if (S.sheet) html += sheetView();
+  html += modalView();
   if (S.tut != null) html += tutView();
   if (S.toast) html += `<div class="toast">${esc(S.toast)}</div>`;
   const keep = f.querySelector('.main, .land'); const top = keep ? keep.scrollTop : 0;
@@ -890,13 +928,13 @@ function render(){
   const mg = f.querySelector('.msgs'); if (mg) mg.scrollTop = mg.scrollHeight;
 }
 const TUT = [
-  {ic:'🎬', t:'¡Bienvenido a GPD 2!', d:'Rankeás películas y la app te ayuda a elegir qué ver con tus amigos. Te mostramos las secciones en 30 segundos.'},
-  {tab:'home', t:'Inicio: rankeá películas', d:'Acá están todas las películas.', todo:'Tocá una portada, ponele estrellas (podés usar medias, ej. 3.5) y guardá. Cuantas más rankees, mejores recomendaciones.'},
-  {tab:'friends', t:'Amigos', d:'Para usar match, perfiles y chat necesitás amigos.', todo:'Buscá a alguien por su @usuario y tocá "Agregar". Cuando te acepte, ya son amigos: podés ver su perfil con su top 4 y chatear.'},
-  {tab:'match', t:'Grupos y trivias 🎮', d:'Para decidir qué ver con amigos y jugar mientras tanto.', todo:'Creá un grupo (aunque sea sin invitados), compartí el enlace o invitá amigos desde la app. Adentro del grupo están "Buscar película" y las trivias.'},
-  {tab:'twin', t:'Alma gemela', d:'Una persona que puntúa casi igual que vos.', todo:'Aparece sola cuando hay alguien compatible. Si no ves a nadie, rankeá más películas.'},
-  {tab:'chat', t:'Chats', d:'Hablá con tus amigos.', todo:'Un globito naranja te avisa cuando tenés mensajes sin leer y de quién son.'},
-  {chip:1, t:'Tu perfil', d:'Tocá tu nombre, arriba a la derecha.', todo:'Ahí elegís tu top 4 de películas favoritas, que ven tus amigos.'},
+  {ic:'🎬', t:'¡Bienvenido a GPD 2!', d:'Acá elegís qué ver con tus amigos. Te mostramos las 6 secciones en un minuto.'},
+  {tab:'home', t:'1 · Inicio', d:'Tus novedades y todas las películas.', todo:'Tocá una portada, ponele estrellas y guardá. Si usás Letterboxd, tocá "Importar" para traer tus calificaciones.'},
+  {tab:'friends', t:'2 · Amigos', d:'Todo lo social arranca acá.', todo:'Escribí el @usuario de un amigo y tocá "Agregar". Cuando te acepte, pueden chatear y ver el perfil del otro.'},
+  {tab:'match', t:'3 · Grupos y trivias 🎮', d:'Las trivias están en esta pestaña.', todo:'Tocá "Crear grupo" (invitá amigos o mandá el enlace). Adentro del grupo vas a ver "Buscar película" y los dos juegos de trivia con el botón "Jugar".'},
+  {tab:'twin', t:'4 · Alma gemela', d:'La persona que puntúa más parecido a vos.', todo:'Aparece sola cuando hay alguien compatible. Si no ves a nadie, rankeá más películas.'},
+  {tab:'chat', t:'5 · Chats', d:'Hablá con tus amigos.', todo:'Un globito naranja te avisa cuando tenés mensajes sin leer y de quién son.'},
+  {chip:1, t:'6 · Tu perfil', d:'Tocá tu nombre, arriba a la derecha.', todo:'Ahí elegís tu top 4, importás Letterboxd, ves a quién bloqueaste y podés eliminar tu cuenta.'},
 ];
 function tutView(){
   const i = S.tut, s = TUT[i], last = i === TUT.length - 1, first = i === 0;
@@ -931,7 +969,7 @@ function landingView(){
       <div><h3>✨ Match con amigos</h3><p>Elegí con quiénes mirar algo y te decimos cuánto le puede gustar al grupo.</p></div>
       <div><h3>💞 Tu alma gemela de películas</h3><p>Encontrá a alguien que rankea como vos y mirá qué le gustó.</p></div>
       <div><h3>🎮 Trivias en grupo</h3><p>¿Quién escribió esa reseña? Jugá con un enlace, sumá puntos y subí al podio.</p></div></section>
-    <footer class="lfoot">${logo()}<div class="muted">${modeLine()}</div><div class="muted" style="font-size:11px">Versión 19/10 · inicio con portada</div></footer></div>`;
+    <footer class="lfoot">${logo()}<div class="muted">${modeLine()}</div><div class="muted" style="font-size:12px"><button class="lnk" data-act="openLegal">Términos y privacidad</button></div></footer></div>`;
 }
 
 function authView(){
@@ -942,8 +980,9 @@ function authView(){
       <label class="muted">Nombre de usuario${signup ? ' (único, de 3 a 16 caracteres: letras, números, _ y .)' : ''}</label>
       <input class="inp" id="au" maxlength="16" autocapitalize="none" autocomplete="username" placeholder="usuario" value="${esc(A.u||'')}">
       <label class="muted">Contraseña${signup ? ' (mínimo 6 caracteres)' : ''}</label>
-      <input class="inp" id="ap" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="••••••">
+      <input class="inp" id="ap" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="••••••" value="${esc(A.p||'')}">
       ${signup ? `<label class="muted">Color de tu avatar</label><div class="swatches">${COLORS.map(c => `<button data-act="color" data-id="${c}" class="${d.color===c?'on':''}" style="background:${c}"></button>`).join('')}</div>` : ''}
+      ${signup ? `<label class="agebox"><input type="checkbox" id="aterms" data-act="termsToggle" ${A.terms?'checked':''}><span>Leí y acepto los <button class="lnk" type="button" data-act="openLegal" style="display:inline;padding:0">Términos y la Política de Privacidad</button>.</span></label>` : ''}
       ${signup ? `<label class="agebox"><input type="checkbox" id="aage" data-act="ageToggle" ${A.age?'checked':''}><span>Declaro que tengo <b>${MIN_AGE} años o más</b>, la edad mínima requerida en Argentina para tener una cuenta en una red social con chat.</span></label>` : ''}
       ${A.err ? `<div class="err">${esc(A.err)}</div>` : ''}
       <button class="btn block" data-act="doAuth" ${A.busy?'disabled':''}>${A.busy ? 'Un momento…' : signup ? 'Crear cuenta' : 'Entrar'}</button>
@@ -955,6 +994,7 @@ function onboardView(){
   const n = ratedCount(S.me);
   const fresh = S.freshSignup;
   return `<div class="main"><button class="back" data-act="onbBack">← ${fresh ? 'Volver (cancela el registro)' : 'Salir'}</button><h1>Rankeá películas</h1>
+    ${recoverCard()}
     <p class="sub">Tocá una portada para ponerle estrellas (y una reseña corta si querés). Con 5 ya podemos recomendarte.</p>
     ${importBox()}${filterBox()}${genreBar()}<div class="grid">${myGrid()}</div>${pager()}${onlineBox()}
     <div style="position:sticky;bottom:-8px;padding-top:16px;background:linear-gradient(transparent,var(--dark) 40%)">
@@ -1015,6 +1055,20 @@ function topSlots(u, mine){
     if (id) return `<div class="tslot"><div class="poster" ${mine?`data-act="pickSlot" data-id="${i}"`:''} style="background-image:url(${posterURL(id)})"><div class="stars">${stars((u.ratings||{})[id]||0)}</div></div><div class="cap">${esc(MOVIE[id].title)}</div></div>`;
     return mine ? `<div class="tslot"><div class="poster empty" data-act="pickSlot" data-id="${i}">＋</div><div class="cap muted">Elegir</div></div>` : `<div class="tslot"><div class="poster empty"></div></div>`; }).join('')}</div>`;
 }
+/* Cuenta anterior con el mismo nombre y más calificaciones (por ejemplo, de una versión vieja de la app o un registro duplicado) */
+function recoverCandidate(){
+  if (!S.me) return null;
+  const mine = String(S.me.username || S.me.name || '').toLowerCase(); if (!mine) return null;
+  return Object.values(S.real).filter(u => u.uid !== S.uid && String(u.username || u.name || '').toLowerCase() === mine && ratedCount(u) > ratedCount(S.me))
+    .sort((x,y) => ratedCount(y) - ratedCount(x))[0] || null;
+}
+const recoverCard = () => { const c = recoverCandidate(); return c ? `<div class="card" style="border-color:var(--green);margin:10px 0"><h3 style="margin:0">🔎 Encontramos datos de una cuenta anterior</h3><p class="sub" style="margin:6px 0 10px">Hay otra cuenta con tu nombre (@${esc(c.username||c.name)}) con <b style="color:#fff">${ratedCount(c)} películas rankeadas</b>. ¿Querés recuperar esas calificaciones, reseñas y tu top 4?</p><button class="btn block" data-act="recoverData" data-id="${c.uid}">Recuperar mis datos</button></div>` : ''; };
+function ownTools(){
+  const bl = (S.me.blocked||[]).map(userOf);
+  return `${recoverCard()}<div class="sec" style="margin-top:26px">Privacidad y cuenta</div>
+    ${bl.length ? `<div class="muted" style="margin-bottom:6px">Usuarios bloqueados</div><div class="people" style="margin-bottom:10px">${bl.map(u => `<div class="person">${av(u)}<b class="grow">@${esc(u.username||u.name)}</b><button class="btn sm ghost" data-act="unblock" data-id="${u.uid}">Desbloquear</button></div>`).join('')}</div>` : ''}
+    <div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn ghost sm" data-act="openLegal">Términos y privacidad</button><button class="btn ghost sm" data-act="tutOpen">Ver tutorial</button><button class="btn ghost sm" style="color:#ff7a7a" data-act="askDelete">Eliminar mi cuenta</button></div>`;
+}
 function profileView(uid){
   const mine = uid === S.uid, u = mine ? S.me : userOf(uid);
   if (!u || (!mine && !isMutual(S.me, u))) return `<button class="back" data-act="profBack">← Volver</button><div class="card muted">Solo podés ver el perfil de tus amigos confirmados.</div>`;
@@ -1025,10 +1079,12 @@ function profileView(uid){
       ${mine ? '' : `<button class="btn sm" data-act="openChat" data-id="${u.uid}">💬 Chat</button>`}</div>
     <div class="sec">Top 4 favoritas ${mine ? '<span style="text-transform:none;letter-spacing:0">(tocá para elegir o cambiar)</span>' : ''}</div>
     ${topSlots(u, mine)}
+    ${mine ? importBox() : ''}
     ${!mine && !(u.top4||[]).length ? `<div class="muted" style="margin:-4px 0 10px">Todavía no eligió su top 4.</div>` : ''}
     <div class="sec">${mine ? 'Tus películas' : 'Películas que rankeó'} (${list.length})</div>
     ${list.length ? `<div class="grid">${list.slice(0,n).map(m => `<div><div class="poster" style="background-image:url(${posterURL(m.id)});cursor:default"><div class="stars">${stars(u.ratings[m.id])}</div></div><div class="cap">${esc(m.title)}</div></div>`).join('')}</div>
-      ${n < list.length ? `<div style="text-align:center;margin:14px 0"><button class="btn ghost" data-act="profMore">Ver más (${list.length-n})</button></div>` : ''}` : '<div class="card muted">Todavía no rankeó películas.</div>'}`;
+      ${n < list.length ? `<div style="text-align:center;margin:14px 0"><button class="btn ghost" data-act="profMore">Ver más (${list.length-n})</button></div>` : ''}` : '<div class="card muted">Todavía no rankeó películas.</div>'}
+    ${mine ? ownTools() : `<div class="row" style="margin-top:22px;justify-content:center;gap:10px"><button class="btn ghost sm" data-act="askReport" data-id="${u.uid}">🚩 Reportar</button><button class="btn ghost sm" data-act="askBlock" data-id="${u.uid}">🚫 Bloquear</button></div>`}`;
 }
 function pickView(){
   const me = S.me, q = norm(S.pickQ || '').trim(), cur = me.top4 || [];
@@ -1045,7 +1101,7 @@ function cell(m){
 }
 
 function appView(){
-  const tabs = [['home','🎬','Inicio'],['friends','👥','Amigos'],['match','✨','Grupos'],['twin','💞','Alma gemela'],['chat','💬','Chats']];
+  const tabs = [['home','🎬','Inicio'],['friends','👥','Amigos'],['match','🎮','Grupos y trivias'],['twin','💞','Alma gemela'],['chat','💬','Chats']];
   let body = '';
   if (S.prof) body = profileView(S.prof);
   else if (S.tab === 'home') body = homeTab();
@@ -1068,13 +1124,14 @@ function homeTab(){
       <div class="card"><h2>${n}</h2><div class="muted">películas</div></div>
       <div class="card"><h2>${fr.length}</h2><div class="muted">amigos</div></div>
       <div class="card"><h2>${tw ? Math.round(tw.s.sim*100)+'%' : '—'}</h2><div class="muted">afinidad con tu alma gemela</div></div></div>
+    <div class="card" style="margin:10px 0"><div class="row"><div class="grow"><h3 style="margin:0">🎮 Trivias con amigos</h3><p class="sub" style="margin:4px 0 0">Entrá a <b style="color:#fff">Grupos y trivias</b>, creá un grupo y jueguen mientras eligen qué ver.</p></div><button class="btn sm" data-act="tab" data-id="match">Jugar</button></div></div>
+    <div class="card" style="margin:10px 0"><div class="row"><div class="grow"><h3 style="margin:0">📥 ¿Usás Letterboxd?</h3><p class="sub" style="margin:4px 0 0">Traé tus calificaciones y no empieces de cero.</p></div><button class="btn sm" data-act="profile" data-id="${S.uid}">Importar</button></div></div>
     <div class="sec">Novedades de tus amigos</div>
     ${feed.length ? `<div class="feed">${feed.map(a => `<div class="fitem">${poster(a.movie.id)}<div class="cap"><b style="color:#fff">${esc(a.user.name)}</b> · <span style="color:var(--green)">${stars(a.stars)}</span><br>${esc(a.movie.title)}${a.ts ? `<br><span style="color:var(--low)">hace ${ago(a.ts)}</span>` : ''}</div></div>`).join('')}</div>`
       : `<div class="card muted">Todavía no hay novedades. <button class="lnk" data-act="tab" data-id="friends">Buscá a tus amigos por nombre de usuario</button>.</div>`}
     ${pop.length ? `<div class="sec">Populares entre vos y tus amigos</div><div class="feed">${pop.map(p => `<div class="fitem">${poster(p.movie.id)}<div class="cap"><b style="color:#fff">${esc(p.movie.title)}</b><br><span style="color:var(--green)">${p.avg.toFixed(1)} ★</span> · ${p.n} ${p.n===1?'persona':'personas'}</div></div>`).join('')}</div>` : ''}
-    <div class="card" style="margin:6px 0 14px"><div class="row"><div class="grow"><h3 style="margin:0">🎮 Trivias con amigos</h3><p class="sub" style="margin:4px 0 0">Creá un grupo en la pestaña Grupos y jueguen mientras eligen qué ver.</p></div><button class="btn sm" data-act="tab" data-id="match">Ir a Grupos</button></div></div>
     <div class="sec">Tus películas <button class="lnk" data-act="tutOpen" style="float:right;text-transform:none;letter-spacing:0">¿Cómo funciona? Ver tutorial</button></div>
-    ${importBox()}${filterBox()}${genreBar()}<div class="grid">${myGrid()}</div>${pager()}${onlineBox()}`;
+    ${filterBox()}${genreBar()}<div class="grid">${myGrid()}</div>${pager()}${onlineBox()}`;
 }
 
 function friendsTab(){
@@ -1113,7 +1170,7 @@ function matchTab(){
   const mine = (S.groups||[]).slice().sort((x,y) => (y.created||0) - (x.created||0));
   const row = g => { const joined = (g.members||[]).includes(S.uid), host = userOf(g.host) || {name:'?'};
     return `<div class="person" data-act="openGroup" data-id="${g.id}" style="cursor:pointer"><div class="avs">${gMembers(g).slice(0,3).map(u => av(u,'sm')).join('')}</div><div class="grow"><b>${esc(g.name||'Grupo')}</b><div class="muted">${(g.members||[]).length} integrante${(g.members||[]).length===1?'':'s'} · creado por ${g.host===S.uid?'vos':esc(host.name)}${roomLive(g)?' · <span style="color:var(--green)">🎮 trivia en curso</span>':''}</div></div>${joined ? '<span class="muted">Entrar ›</span>' : '<span class="btn sm">Unirme</span>'}</div>`; };
-  return `<h1>Grupos</h1><p class="sub">Un grupo es para decidir qué ver con tus amigos y jugar trivias mientras tanto. Lo armás vos y los demás entran desde la app o con un enlace.</p>
+  return `<h1>🎮 Grupos y trivias</h1><p class="sub">Un grupo es para decidir qué ver con tus amigos y jugar trivias mientras tanto. Lo armás vos y los demás entran desde la app o con un enlace.</p>
     ${mine.length ? `<div class="sec">Tus grupos (${mine.length})</div><div class="people">${mine.map(row).join('')}</div>` : ''}
     <div class="sec">Crear un grupo nuevo</div>
     <input class="inp" id="gname" maxlength="30" placeholder="Nombre del grupo (opcional)" value="${esc(M.gname||'')}" style="margin-bottom:10px">
@@ -1204,12 +1261,12 @@ function chatTab(){
   if (C.with){
     const o = userOf(C.with), ban = twinBanner(S.me, o);
     return `<div class="chatwrap" style="height:calc(100dvh - ${S.device==='desktop'?'250px':'290px'})"><button class="back" data-act="chatBack">← Chats</button>
-      <div class="row" style="margin-bottom:8px">${av(o)}<h2 style="margin:0">${esc(o.name)}</h2></div>
+      <div class="row" style="margin-bottom:8px">${av(o)}<h2 style="margin:0" class="grow">${esc(o.name)}</h2><button class="btn sm ghost" data-act="askReport" data-id="${o.uid}">🚩 Reportar</button><button class="btn sm ghost" data-act="askBlock" data-id="${o.uid}">🚫 Bloquear</button></div>
       ${ban ? `<div class="banner">${esc(ban)}</div>` : ''}
       <div class="msgs" id="msgs">${msgsHTML()}</div>
       <div class="send"><input class="inp" id="msgin" placeholder="Escribí un mensaje…" autocomplete="off"><button class="btn" data-act="send">Enviar</button></div></div>`;
   }
-  const ids = [...new Set([...myFriends(), ...(S.me.contacts||[]), ...Object.values(S.threads).map(otherOf)])].filter(id => U()[id]);
+  const ids = [...new Set([...myFriends(), ...(S.me.contacts||[]), ...Object.values(S.threads).map(otherOf)])].filter(id => U()[id] && !hidden(U()[id]));
   const rows = ids.map(id => ({id, u:userOf(id), t:S.threads[chatId(S.uid, id)]}))
     .sort((p, q) => unreadOf(q.t) - unreadOf(p.t) || ((q.t && q.t.lastTs) || 0) - ((p.t && p.t.lastTs) || 0));
   const total = unreadTotal(), people = rows.filter(r => unreadOf(r.t) > 0).length;
@@ -1275,21 +1332,23 @@ async function saveMe(patch){
   S.me = Object.assign({}, S.me, patch);   // optimista
   S.real[S.uid] = S.me;
   await DB.updateUser(S.uid, patch);
+  saveBackup();
 }
 const AUTH_ERR = {'auth/email-already-in-use':'Ese nombre de usuario ya existe. Elegí otro.','auth/invalid-credential':'Usuario o contraseña incorrectos.','auth/user-not-found':'Usuario o contraseña incorrectos.','auth/wrong-password':'Usuario o contraseña incorrectos.','auth/weak-password':'La contraseña es muy débil (mínimo 6 caracteres).','auth/operation-not-allowed':'Falta habilitar «Correo electrónico/contraseña» en Firebase > Authentication > Sign-in method.','auth/network-request-failed':'No hay conexión con Firebase.','auth/too-many-requests':'Demasiados intentos. Probá en unos minutos.','permission-denied':'Firebase rechazó el permiso: revisá las reglas de Firestore.'};
 async function doAuth(){
   const A = S.auth, signup = A.mode === 'signup';
   const username = ($('#au').value || '').trim().toLowerCase().replace(/^@/,''), pass = $('#ap').value || '';
-  A.u = username;
+  A.u = username; A.p = pass;
   if (!validUsername(username)) { A.err = 'El usuario debe tener de 3 a 16 caracteres: letras minúsculas, números, _ o .'; return render(); }
   if (pass.length < 6) { A.err = 'La contraseña debe tener al menos 6 caracteres.'; return render(); }
+  if (signup && !A.terms) { A.err = 'Para crear tu cuenta tenés que aceptar los Términos y la Política de Privacidad.'; return render(); }
   if (signup && !A.age) { A.err = `Para crear tu cuenta tenés que confirmar que tenés ${MIN_AGE} años o más.`; return render(); }
   A.err = ''; A.busy = true; render();
   try {
     S.uid = signup ? await DB.signUp(username, pass) : await DB.signIn(username, pass);
     S.freshSignup = signup;
-    if (signup) await DB.setUser(S.uid, {uid:S.uid, username, name:username, color:S.draft.color, ratings:{}, ratedAt:{}, reviews:{}, friends:[], contacts:[], ageConfirmed:MIN_AGE, created:Date.now()});
-    A.busy = false; await startSession();
+    if (signup) await DB.setUser(S.uid, {uid:S.uid, username, name:username, color:S.draft.color, ratings:{}, ratedAt:{}, reviews:{}, friends:[], contacts:[], ageConfirmed:MIN_AGE, termsAccepted:true, termsAt:Date.now(), created:Date.now()});
+    A.busy = false; A.p = ''; await startSession();
   } catch(e){
     A.busy = false; A.err = AUTH_ERR[e && (e.code || '')] || ('No se pudo completar: ' + ((e && (e.code || e.message)) || e)); render();
   }
@@ -1318,13 +1377,27 @@ async function startSession(){
     if (first){ first = false; res(); } else softRender();
   }, rej)); });
   S.me = S.real[S.uid] || null;
+  if (!S.me){ try { const fresh = await DB.getUser(S.uid); if (fresh){ S.me = fresh; S.real[S.uid] = fresh; } } catch(_){} }   // antes de crear un perfil vacío, confirmamos con el servidor que de verdad no existe
   if (!S.me){   // cuenta sin perfil (p. ej. se cortó el registro): lo creamos
     const u = DB.username(S.uid);
     if (!u){ await DB.signOut(); S.uid = null; S.view = 'landing'; render(); return; }   // sesión anónima vieja
     S.me = {uid:S.uid, username:u, name:u, color:S.draft.color, ratings:{}, ratedAt:{}, reviews:{}, friends:[], contacts:[], created:Date.now()};
     await DB.setUser(S.uid, S.me); S.real[S.uid] = S.me;
   }
+  restoreBackup();
   S.tab = 'home'; afterLogin();
+}
+/* Copia de seguridad local de las calificaciones: si por cualquier motivo faltan en el servidor, se recuperan */
+const BK = uid => 'gpd2_bk_' + uid;
+function saveBackup(){ try { const m = S.me; localStorage.setItem(BK(S.uid), JSON.stringify({ratings:m.ratings||{}, ratedAt:m.ratedAt||{}, reviews:m.reviews||{}, top4:m.top4||[]})); } catch(_){} }
+function restoreBackup(){
+  try {
+    const bk = JSON.parse(localStorage.getItem(BK(S.uid)) || 'null'); if (!bk) return saveBackup();
+    const ratings = Object.assign({}, S.me.ratings), ratedAt = Object.assign({}, S.me.ratedAt), reviews = Object.assign({}, S.me.reviews);
+    let n = 0; for (const id in (bk.ratings||{})) if (!(ratings[id] > 0) && bk.ratings[id] > 0){ ratings[id] = bk.ratings[id]; if (bk.ratedAt && bk.ratedAt[id]) ratedAt[id] = bk.ratedAt[id]; if (bk.reviews && bk.reviews[id]) reviews[id] = bk.reviews[id]; n++; }
+    if (n){ const patch = {ratings, ratedAt, reviews}; if (!(S.me.top4||[]).length && (bk.top4||[]).length) patch.top4 = bk.top4; S.me = Object.assign({}, S.me, patch); S.real[S.uid] = S.me; DB.updateUser(S.uid, patch).catch(() => {}); console.info('Recuperadas ' + n + ' calificaciones desde la copia local'); }
+    saveBackup();
+  } catch(_){}
 }
 function teardown(){
   stopBots(); if (S.roomUnsub){ S.roomUnsub(); S.roomUnsub = null; } if (S.chat.unsub){ S.chat.unsub(); S.chat.unsub = null; }
@@ -1470,6 +1543,7 @@ async function openChat(uid){
 async function sendMsg(){
   const inp = $('#msgin'); const text = inp.value.trim(); if (!text) return; inp.value = '';
   const other = S.chat.with, cid = chatId(S.uid, other);
+  if (hidden(userOf(other))){ toast('No podés enviar mensajes a este usuario.'); return; }
   try { await DB.sendMsg(cid, {from:S.uid, text, ts:Date.now()}); }
   catch(e){ toast('No se pudo enviar: ' + (e.code || e.message)); const i2 = $('#msgin'); if (i2) i2.value = text; return; }
   DB.touchThread(cid, S.uid, other, text).catch(e => console.warn('thread', e));
@@ -1558,6 +1632,29 @@ document.addEventListener('click', async e => {
     case 'resume': startSession(); break;
     case 'rate': { const r = (S.me.ratings||{})[id] || 0; S.sheet = {id, stars:r, text:(S.me.reviews||{})[id] || ''}; render(); break; }
     case 'star': { const ta = $('#rtext'); S.sheet.text = ta ? ta.value : S.sheet.text; S.sheet.stars = +id; render(); break; }
+    case 'askReport': S.report = {uid:id, reason:'', text:''}; render(); break;
+    case 'askBlock': S.confirm = {type:'block', uid:id}; render(); break;
+    case 'repReason': { const ta = $('#reptext'); if (ta) S.report.text = ta.value; S.report.reason = id; render(); break; }
+    case 'sendReport': { const R = S.report, ta = $('#reptext'); const rep = {by:S.uid, target:R.uid, reason:R.reason, text:(ta ? ta.value : R.text || '').slice(0,300), ts:Date.now()};
+      try { await DB.report(rep); toast('✅ Reporte enviado. ¡Gracias por cuidar la comunidad!'); } catch(e){ toast('No se pudo enviar el reporte (' + (e.code || e.message) + ')'); } S.report = null; render(); break; }
+    case 'doBlock': { const bl = [...new Set([...(S.me.blocked||[]), id])]; S.confirm = null; S.match.sel = S.match.sel.filter(x => x !== id);
+      if (S.chat.with === id){ if (S.chat.unsub){ S.chat.unsub(); S.chat.unsub = null; } S.chat.with = null; } if (S.prof === id) S.prof = null;
+      await saveMe({blocked:bl, friends:(S.me.friends||[]).filter(x => x !== id), contacts:(S.me.contacts||[]).filter(x => x !== id)}); render(); toast('🚫 Usuario bloqueado'); break; }
+    case 'unblock': await saveMe({blocked:(S.me.blocked||[]).filter(x => x !== id)}); render(); toast('Usuario desbloqueado'); break;
+    case 'recoverData': { const o = S.real[id]; if (!o) break;
+      const ratings = Object.assign({}, o.ratings, S.me.ratings), ratedAt = Object.assign({}, o.ratedAt, S.me.ratedAt), reviews = Object.assign({}, o.reviews, S.me.reviews);
+      const patch = {ratings, ratedAt, reviews}; if (!(S.me.top4||[]).length && (o.top4||[]).length) patch.top4 = o.top4;
+      await saveMe(patch); toast('✅ Recuperamos ' + ratedCount({ratings}) + ' calificaciones');
+      if (S.view === 'onboard' && ratedCount(S.me) >= 5){ S.freshSignup = false; afterLogin(); } else render(); break; }
+    case 'askDelete': S.confirm = {type:'delete'}; render(); break;
+    case 'doDelete': { const v = (($('#delconf')||{}).value || '').trim().toLowerCase();
+      if (v !== (S.me.username || S.me.name || '').toLowerCase()){ toast('Escribí tu usuario tal cual para confirmar'); break; }
+      const uid = S.uid, uname = S.me.username; S.confirm = null;
+      try { for (const g of (S.groups||[])) await DB.leaveGroup(g.id, uid).catch(() => {}); teardown(); await DB.deleteAccount(uid, uname); try { localStorage.removeItem(BK(uid)); } catch(_){} resetState(); S.view = 'landing'; render(); toast('Tu cuenta fue eliminada.'); }
+      catch(e){ render(); toast('No se pudo eliminar (' + (e.code || e.message) + '). Si pide volver a iniciar sesión, salí, entrá de nuevo e intentá otra vez.'); } break; }
+    case 'openLegal': if (S.view === 'auth'){ S.auth.u = ($('#au')||{}).value || S.auth.u; S.auth.p = ($('#ap')||{}).value || ''; } S.legal = true; render(); break;
+    case 'termsToggle': S.auth.terms = t.checked; break;
+    case 'closeModal': if (e.target === t) { S.report = null; S.confirm = null; S.legal = null; render(); } break;
     case 'closeSheet': if (e.target === t) { S.sheet = null; render(); } break;
     case 'saveRating': {
       const sh = S.sheet, ta = $('#rtext'); const text = ta ? ta.value.trim() : '';
