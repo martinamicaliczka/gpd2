@@ -847,6 +847,7 @@ const posterURL = id => POSTERS[id] || (MOVIE[id] && MOVIE[id].poster) || '';
 const U = () => Object.assign(DEMO ? Object.fromEntries(DEMO_USERS.map(u => [u.uid,u])) : {}, S.real);
 const userOf = uid => U()[uid] || {uid, name:'Alguien', color:'#556', ratings:{}, reviews:{}, friends:[]};
 const allOthers = () => Object.values(U()).filter(u => u.uid !== S.uid);
+const ratedCount = u => Object.values((u && u.ratings) || {}).filter(r => r > 0).length;   // cuenta las calificaciones aunque la película todavía no se haya cargado
 const poster = (id, cls='', attr='') => `<div class="poster ${cls}" ${attr} style="background-image:url(${posterURL(id)})"></div>`;
 const av = (u, cls='') => `<div class="av ${cls}" style="background:${u.color}">${esc((u.name||'?')[0].toUpperCase())}</div>`;
 const stars = n => { const f = Math.floor(n), h = n - f >= .5 ? 1 : 0; return '★'.repeat(f) + (h ? '½' : '') + '☆'.repeat(5 - f - h); };
@@ -951,7 +952,7 @@ function authView(){
 }
 
 function onboardView(){
-  const n = rated(S.me).length;
+  const n = ratedCount(S.me);
   const fresh = S.freshSignup;
   return `<div class="main"><button class="back" data-act="onbBack">← ${fresh ? 'Volver (cancela el registro)' : 'Salir'}</button><h1>Rankeá películas</h1>
     <p class="sub">Tocá una portada para ponerle estrellas (y una reseña corta si querés). Con 5 ya podemos recomendarte.</p>
@@ -1295,7 +1296,10 @@ async function doAuth(){
 }
 async function startSession(){
   S.unsubs.forEach(f => { try { f(); } catch(_){} }); S.unsubs = [];
-  S.unsubs.push(DB.onMovies(list => { let n = 0; list.forEach(m => { if (registerMovie(m)) n++; }); if (n && S.me) softRender(); }));
+  await new Promise(res => {   // esperamos el catálogo compartido (películas agregadas por búsqueda) antes de decidir si ya rankeó 5
+    const t = setTimeout(res, 3500);
+    S.unsubs.push(DB.onMovies(list => { let n = 0; list.forEach(m => { if (registerMovie(m)) n++; }); clearTimeout(t); res(); if (n && S.me) softRender(); }));
+  });
   S.threads = {}; S.prevUnread = {}; S.threadsReady = false;
   S.unsubs.push(DB.onThreads(S.uid, onThreads, err => { if (!S.threadsWarned){ S.threadsWarned = true; toast('No se pueden leer los mensajes pendientes (' + (err.code || err.message) + '). Falta publicar las reglas nuevas de Firestore.'); } }));
   S.groups = [];
@@ -1352,7 +1356,7 @@ async function onboardBack(){
   resetState(); S.auth = {mode:'login', err:'', busy:false, u: fresh ? '' : uname}; S.view = 'auth'; render();
 }
 function afterLogin(){
-  S.view = rated(S.me).length >= 5 ? 'app' : 'onboard';
+  S.view = ratedCount(S.me) >= 5 ? 'app' : 'onboard';
   render();
   if (S.view === 'app' && S.pendingRoom){ const id = S.pendingRoom; S.pendingRoom = null; openRoom(id); }
   if (S.view === 'app' && S.pendingGroup){ const id = S.pendingGroup; S.pendingGroup = null; history.replaceState(null, '', location.pathname);
