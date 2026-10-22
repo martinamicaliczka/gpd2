@@ -479,15 +479,15 @@ function predict(u, m){
 function genreAffinity(u, m){
   const gm = genreMeans(u.ratings||{});
   const vals = m.genres.map(g => gm[g]).filter(v => v !== undefined);
-  if (vals.length) return avg(vals);
-  const all = rated(u).map(id => u.ratings[id]);
-  return all.length ? avg(all) : 3;
+  return vals.length ? avg(vals) : 3;     // géneros que nunca puntuó: neutro (no cuentan como "le gusta")
 }
 const LIKE_MIN = 3.5;
+const MIN_PCT = 70;   // por debajo de esta afinidad ya no se recomienda: ahí termina la lista
 
 /* Recomendaciones para un grupo. Pesos:
-   50% que nadie (o casi nadie) la haya visto · 30% que la categoría le guste a todos o a la mayoría · 20% nota esperada del grupo.
-   Orden: primero las que nadie vio; dentro de cada tramo, por puntaje. genres: {Drama:'like'|'no'} */
+   Orden (puntaje): 50% que nadie la haya visto · 30% que la categoría le guste a todos o a la mayoría · 20% nota esperada del grupo.
+   Primero las que nadie vio; dentro de cada tramo, por puntaje. El % mostrado es la AFINIDAD (60% consenso de categoría + 40% nota esperada)
+   y solo se recomienda lo que llega a MIN_PCT. genres: {Drama:'like'|'no'} */
 function groupRecs(users, genres={}){
   const like = Object.keys(genres).filter(g => genres[g]==='like');
   const no = Object.keys(genres).filter(g => genres[g]==='no');
@@ -502,11 +502,12 @@ function groupRecs(users, genres={}){
     const likers = users.filter(u => genreAffinity(u,m) >= LIKE_MIN).length;
     const consensus = likers / n;                                        // 1 = a todos les gusta la categoría
     const appeal = (0.7*avg(vals) + 0.3*Math.min(...vals)) / 5;
-    const score = 0.5*unseen + 0.3*consensus + 0.2*appeal;
-    out.push({movie:m, preds, score, unseen, consensus, likers, nobodySaw: seenBy.length === 0, pct: clamp(Math.round(score*100),1,99),
+    const score = 0.5*unseen + 0.3*consensus + 0.2*appeal;               // para ordenar
+    const affinity = 0.6*consensus + 0.4*appeal;                         // lo que se muestra como % y define el corte
+    out.push({movie:m, preds, score, unseen, consensus, likers, nobodySaw: seenBy.length === 0, pct: clamp(Math.round(affinity*100),1,99), good: Math.round(affinity*100) >= MIN_PCT,
               liked: m.genres.some(g => like.includes(g)), seenBy});
   }
-  out.sort((a,b) => (b.liked - a.liked) || (b.nobodySaw - a.nobodySaw) || (b.score - a.score));
+  out.sort((a,b) => (b.nobodySaw - a.nobodySaw) || (b.liked - a.liked) || (b.score - a.score));
   return out;
 }
 
@@ -632,7 +633,7 @@ function lbMatch(items){
   return {matched, unmatched};
 }
 
-if (typeof module !== 'undefined') module.exports = {genreAffinity, isProfane, parseCSV, lbItems, lbMatch, lbFind, lbStars, normTitle, activityFeed, popular, validUsername, BASE_IDS, registerMovie, fromTmdb, friendCode, isMutual, incomingRequests, sentRequests, MOVIES, MOVIE, GENRES, DEMO_USERS, COLORS, predict, groupRecs, similarity, twins, twinRecs, twinBanner, genreMeans, buildReviewQuestions, buildColorQuestions, leaderboard, rated};
+if (typeof module !== 'undefined') module.exports = {MIN_PCT, searchUsers, genreAffinity, isProfane, parseCSV, lbItems, lbMatch, lbFind, lbStars, normTitle, activityFeed, popular, validUsername, BASE_IDS, registerMovie, fromTmdb, friendCode, isMutual, incomingRequests, sentRequests, MOVIES, MOVIE, GENRES, DEMO_USERS, COLORS, predict, groupRecs, similarity, twins, twinRecs, twinBanner, genreMeans, buildReviewQuestions, buildColorQuestions, leaderboard, rated};
 
 /* ---------- Filtro de malas palabras (los mensajes se difuminan; se pueden mostrar con un toque) ---------- */
 const BAD_STEMS = ['boludo','pelotudo','pelotud','forro','hijo de puta','hijoputa','hdp','hijueputa','puta','puto','putita','mierda','carajo','cagar','cagada','cagón','concha','conchudo','conchuda','verga','pija','pijudo','poronga','chota','culo','culiado','culeado','orto','cojudo','coger','garcha','garchar','gilipollas','capullo','marica','maricon','mariconazo','trolo','sorete','chupapija','chupame','pajero','paja','mogolico','mogólico','retrasado','subnormal','imbecil','idiota','estupido','boluda','pelotuda','malparido','gonorrea','zorra','perra','cabron','joder','jodete','andate a la mierda','la puta madre','lpm','ctm','fuck','fucker','fucking','shit','bitch','bastard','asshole','dick','cunt','slut','whore','nigger','faggot','retard'];
@@ -647,6 +648,14 @@ function isProfane(text){
   t = t.replace(/[^a-z\s]/g,'').replace(/(.)\1{2,}/g,'$1$1');                                 // "boluuudoooo" -> "boluudoo"
   const dedup = t.replace(/(.)\1+/g,'$1');
   return BAD_WORDS.some(r => r.test(' ' + t + ' ') || r.test(' ' + dedup + ' '));
+}
+
+/* Buscador de usuarios estilo Instagram: 1-2 letras → solo los que EMPIEZAN con eso; 3 o más → primero los que empiezan, después los que lo contienen */
+function searchUsers(users, q){
+  q = String(q || '').trim().toLowerCase().replace(/^@/,'');
+  if (!q) return [];
+  const rank = u => { const n = (u.username || '').toLowerCase(); if (n === q) return 0; if (n.startsWith(q)) return 1; if (q.length >= 3 && n.includes(q)) return 2; return 9; };
+  return users.map(u => ({u, r:rank(u)})).filter(x => x.r < 9).sort((a,b) => a.r - b.r || a.u.username.localeCompare(b.u.username)).map(x => x.u);
 }
 
 /* ===== GPD 2 · capa de datos: Firebase (Firestore + auth anónima) o modo local ===== */
@@ -1071,8 +1080,7 @@ function friendsTab(){
   const all = allOthers().filter(u => u.username);
   const fr = myFriends().map(userOf), inc = incomingRequests(S.me, all), sent = sentRequests(S.me, all);
   const q = (S.friendQ||'').trim().toLowerCase().replace(/^@/,'');
-  const found = q ? all.filter(u => u.username.includes(q) && !isMutual(S.me,u) && !inc.includes(u))
-    .sort((a,b) => (b.username===q) - (a.username===q) || a.username.localeCompare(b.username)).slice(0,20) : [];
+  const found = searchUsers(all.filter(u => !isMutual(S.me,u) && !inc.includes(u)), q).slice(0,20);
   const row = (u, kind) => {
     const s = similarity(S.me, u);
     const btn = kind==='friend' ? `<button class="btn sm" data-act="openChat" data-id="${u.uid}">💬 Chat</button><button class="btn sm ghost" data-act="unfollow" data-id="${u.uid}">Quitar</button>`
@@ -1128,7 +1136,7 @@ function groupView(){
     ${joined ? `
     ${live ? `<div class="card" style="border-color:var(--green)"><h3 style="margin:0">🎮 Hay una trivia en curso</h3><p class="sub" style="margin:4px 0 10px">${live.kind==='review'?'¿Quién la escribió?':'Adiviná la portada'} · empezada por ${esc((userOf(live.by)||{name:'alguien'}).name)}</p><button class="btn block" data-act="joinLiveRoom" data-id="${live.id}">Unirme a la trivia</button></div>` : ''}
     <div class="sec">🎬 ¿Qué ven?</div>
-    <p class="sub" style="margin:0 0 8px">Tocá los géneros: sí → no → neutro. Te mostramos 5 opciones, priorizando las que nadie vio y las categorías que les gustan a casi todos.</p>
+    <p class="sub" style="margin:0 0 8px">Tocá los géneros: sí → no → neutro. Te mostramos de a 5, priorizando las que nadie vio y las categorías que les gustan a casi todos; podés pedir más hasta que se acaben las de buena afinidad.</p>
     <div>${GENRES.map(x => `<button class="pill ${M.genres[x]||''}" data-act="genre" data-id="${x}">${x}</button>`).join('')}</div>
     <div style="margin:10px 0 18px"><button class="btn block" data-act="runMatch">Buscar película</button></div>
     <div class="sec">🎮 ¿Mientras esperan, juegan?</div>${triviaCards()}
@@ -1145,17 +1153,22 @@ function matchLoading(){
 }
 function matchResults(){
   const M = S.match, n = Math.min(M.shown || 5, M.recs.length);
-  return `<button class="back" data-act="matchReset">← Volver al grupo</button>
-    <div class="row"><div class="avs">${M.group.map(u => av(u,'sm')).join('')}</div><h2 class="grow">Para ver juntos</h2></div>
-    <p class="sub">El % combina que nadie la haya visto, que la categoría le guste al grupo y la nota esperada.</p>
-    ${n ? `<div class="recs">${M.recs.slice(0,n).map(r => `<div class="rec">${poster(r.movie.id)}<div class="grow">
+  const shownRecs = M.recs.slice(0,n), firstSeen = shownRecs.findIndex(r => !r.nobodySaw);
+  const card = r => `<div class="rec">${poster(r.movie.id)}<div class="grow">
       <b>${esc(r.movie.title)}</b> <span class="muted">${r.movie.year}</span>
       <div>${r.movie.genres.map(g => `<span class="tag">${g}</span>`).join('')}${r.liked?'<span class="tag" style="color:var(--green)">tu género</span>':''}</div>
       <div class="bar"><i style="width:${r.pct}%"></i></div>
       <div class="muted" style="margin-top:5px">${r.nobodySaw ? '✨ Nadie la vio todavía' : 'Ya la vieron: ' + r.seenBy.map(id => esc(userOf(id).name)).join(', ')} · ${r.likers} de ${M.group.length} disfrutan este género</div>
-      </div><div class="pct">${r.pct}%</div></div>`).join('')}</div>
-      <div style="text-align:center;margin:14px 0">${n < M.recs.length ? `<button class="btn block" data-act="moreRecs">Ver 5 más (${n} de ${M.recs.length})</button>` : '<div class="muted">No hay más opciones con estos filtros.</div>'}</div>`
-      : '<div class="card muted">No hay películas nuevas que cumplan esos filtros. Probá con menos géneros descartados.</div>'}
+      </div><div class="pct">${r.pct}%</div></div>`;
+  const notice = `<div class="notice" style="margin:14px 0">👀 Estas películas las vio 1 o más personas del grupo, pero creemos que pueden llegar a gustarles.</div>`;
+  const list = shownRecs.map((r,i) => (i === firstSeen ? '</div>' + notice + '<div class="recs">' : '') + card(r)).join('');
+  const done = n >= M.recs.length;
+  return `<button class="back" data-act="matchReset">← Volver al grupo</button>
+    <div class="row"><div class="avs">${M.group.map(u => av(u,'sm')).join('')}</div><h2 class="grow">Para ver juntos</h2></div>
+    <p class="sub">El % es la afinidad con el grupo: qué tanto les gusta la categoría y la nota que esperamos que le pongan. Primero van las que nadie vio. Solo mostramos las que tienen buena afinidad (${MIN_PCT}% o más).</p>
+    ${n ? `<div class="recs">${list}</div>
+      <div style="text-align:center;margin:14px 0">${!done ? `<button class="btn block" data-act="moreRecs">Ver 5 más</button>` : '<div class="muted">🎬 Ya te mostramos todas las que tienen buena afinidad con el grupo. Rankeen más películas para afinar las recomendaciones.</div>'}</div>`
+      : '<div class="card muted">No encontramos películas con buena afinidad para este grupo y estos filtros. Probá con menos géneros descartados o rankeen más películas.</div>'}
     <div class="card" style="margin:10px 0"><div class="row"><div class="grow"><h3 style="margin:0">🎮 ¿Todavía no se deciden?</h3><p class="sub" style="margin:4px 0 0">Jueguen una trivia mientras eligen.</p></div><button class="btn sm" data-act="matchReset">Jugar</button></div></div>`;
 }
 
@@ -1377,7 +1390,7 @@ async function runMatch(){
   M.group = gMembers(S.group);
   M.stage = 'loading'; render();
   await new Promise(r => setTimeout(r, 1500));
-  M.recs = groupRecs(M.group, M.genres); M.shown = 5;
+  M.recs = groupRecs(M.group, M.genres).filter(r => r.good); M.shown = 5;
   M.stage = 'results'; render();
 }
 
