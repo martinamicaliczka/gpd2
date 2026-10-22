@@ -1200,10 +1200,10 @@ function matchTab(){
   return `<h1>🎮 Grupos y trivias</h1><p class="sub">Un grupo es para decidir qué ver con tus amigos y jugar trivias mientras tanto. Lo armás vos y los demás entran desde la app o con un enlace.</p>
     ${mine.length ? `<div class="sec">Tus grupos (${mine.length})</div><div class="people">${mine.map(row).join('')}</div>` : ''}
     <div class="sec">Crear un grupo nuevo</div>
-    <input class="inp" id="gname" maxlength="30" placeholder="Nombre del grupo (opcional)" value="${esc(M.gname||'')}" style="margin-bottom:10px">
-    ${fr.length ? `<div class="muted" style="margin-bottom:6px">Invitá amigos (podés sumar más después con el enlace):</div><div class="people">${fr.map(u => `<div class="person ${M.sel.includes(u.uid)?'sel':''}" data-act="toggleSel" data-id="${u.uid}">${av(u)}<b class="grow">${esc(u.name)}</b><span>${M.sel.includes(u.uid)?'✓':''}</span></div>`).join('')}</div>`
-      : `<div class="muted" style="margin-bottom:8px">Todavía no tenés amigos confirmados, pero igual podés crear el grupo y compartir el enlace.</div>`}
-    <div style="margin-top:14px"><button class="btn block" data-act="createGroup">Crear grupo${M.sel.length ? ' con ' + M.sel.length + ' invitado' + (M.sel.length===1?'':'s') : ''}</button></div>`;
+    ${fr.length ? `<input class="inp" id="gname" maxlength="30" placeholder="Nombre del grupo (opcional)" value="${esc(M.gname||'')}" style="margin-bottom:10px">
+    <div class="muted" style="margin-bottom:6px">Invitá amigos (podés sumar más después con el enlace):</div><div class="people">${fr.map(u => `<div class="person ${M.sel.includes(u.uid)?'sel':''}" data-act="toggleSel" data-id="${u.uid}">${av(u)}<b class="grow">${esc(u.name)}</b><span>${M.sel.includes(u.uid)?'✓':''}</span></div>`).join('')}</div>
+    <div style="margin-top:14px"><button class="btn block" data-act="createGroup">Crear grupo${M.sel.length ? ' con ' + M.sel.length + ' invitado' + (M.sel.length===1?'':'s') : ''}</button></div>`
+    : `<div class="card"><h3 style="margin:0 0 4px">Necesitás al menos un amigo</h3><p class="sub" style="margin:0 0 10px">Los grupos sirven para decidir qué ver con tus amigos. Agregá a alguien en la pestaña Amigos (cuando acepte, va a aparecer acá) y vas a poder crear el grupo.</p><button class="btn" data-act="tab" data-id="friends">Ir a Amigos</button></div>`}`;
 }
 function groupView(){
   const g = S.group, M = S.match;
@@ -1502,6 +1502,7 @@ function openGroup(id){
   });
 }
 async function createGroup(){
+  if (!myFriends().length){ toast('Necesitás al menos un amigo para crear un grupo.'); return; }
   const M = S.match, id = Math.random().toString(36).slice(2,8) + Math.random().toString(36).slice(2,5);
   const name = ((($('#gname')||{}).value) || M.gname || '').trim() || ('Grupo de ' + S.me.name);
   const demos = M.sel.filter(u => (userOf(u) || {}).demo);
